@@ -26,7 +26,7 @@ const AppContent: React.FC = () => {
         <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
         <Route path="/voting" element={<ProtectedRoute><VotingCategories /></ProtectedRoute>} />
         <Route path="/voting/employees" element={<ProtectedRoute><EmployeeVoting /></ProtectedRoute>} />
-        <Route path="/voting/events" element={<ProtectedRoute><EventVoting /></ProtectedRoute>} />
+        <Route path="/voting/resolutions" element={<ProtectedRoute><EventVoting /></ProtectedRoute>} />
         <Route path="/employee/:id" element={<ProtectedRoute><EmployeeDetails /></ProtectedRoute>} />
         <Route path="/event/:id" element={<ProtectedRoute><EventDetails /></ProtectedRoute>} />
         <Route path="/" element={<Navigate to={user ? "/home" : "/login"} />} />

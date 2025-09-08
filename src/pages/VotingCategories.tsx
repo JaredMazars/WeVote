@@ -19,14 +19,14 @@ const VotingCategories: React.FC = () => {
       features: ['Team Leadership', 'Innovation', 'Collaboration', 'Excellence']
     },
     {
-      id: 'events',
+      id: 'resolution',
       title: 'Upcoming Resolutions',
-      description: 'Help decide which company events and initiatives should be prioritized for the upcoming quarter.',
+      description: 'Help decide which company resolution and initiatives should be prioritized for the upcoming quarter.',
       icon: Calendar,
       stats: { candidates: 6, totalVotes: 1109 },
       color: 'from-purple-500 to-pink-500',
       bgColor: 'from-purple-50 to-pink-50',
-      route: '/voting/events',
+      route: '/voting/resolutions',
       features: ['Team Building', 'Learning', 'Networking', 'Wellness']
     }
   ];

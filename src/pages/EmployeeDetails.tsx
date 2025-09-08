@@ -1,22 +1,75 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useParams, useNavigate } from 'react-router-dom';
-import { employees } from '../data/dummyData';
+import apiService from '../services/api';
+import { Employee } from '../utils/types';
 import { ArrowLeft, Mail, Award, Calendar, Building2, Star, CheckCircle, Users } from 'lucide-react';
 
 const EmployeeDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [hasVoted, setHasVoted] = useState(false);
   const [isVoting, setIsVoting] = useState(false);
 
-  const employee = employees.find(emp => emp.id === id);
+  useEffect(() => {
+    const fetchEmployee = async () => {
+      if (!id) return;
+      
+      try {
+        setLoading(true);
+        const response = await apiService.getEmployee(id);
+        if (response.success) {
+          setEmployee(response.data);
+          setHasVoted(response.data.hasVoted || false);
+        } else {
+          setError('Employee not found');
+        }
+      } catch (err) {
+        setError('Failed to fetch employee details');
+        console.error('Error fetching employee:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  if (!employee) {
+    fetchEmployee();
+  }, [id]);
+
+  const handleVote = async () => {
+    if (!employee || hasVoted) return;
+    
+    setIsVoting(true);
+    try {
+      const response = await apiService.voteForEmployee(employee.id);
+      if (response.success) {
+        setHasVoted(true);
+        // Update vote count locally
+        setEmployee(prev => prev ? { ...prev, votes: prev.votes + 1 } : null);
+      }
+    } catch (error) {
+      console.error('Error voting:', error);
+    } finally {
+      setIsVoting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#F4F4F4] flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-[#0072CE] border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (error || !employee) {
     return (
       <div className="min-h-screen bg-[#F4F4F4] flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-[#464B4B] mb-4">Employee not found</h2>
+          <h2 className="text-2xl font-bold text-[#464B4B] mb-4">{error || 'Employee not found'}</h2>
           <button
             onClick={() => navigate('/voting/employees')}
             className="text-[#0072CE] hover:text-[#171C8F]"
@@ -27,17 +80,6 @@ const EmployeeDetails: React.FC = () => {
       </div>
     );
   }
-
-  const handleVote = async () => {
-    setIsVoting(true);
-    // Simulate voting process
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    setHasVoted(true);
-    setIsVoting(false);
-    
-    // Update vote count (in real app, this would be handled by backend)
-    employee.votes += 1;
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F4F4F4] via-white to-[#F4F4F4]">
@@ -89,10 +131,10 @@ const EmployeeDetails: React.FC = () => {
                   </div>
                 </div>
               </div>
-              {/* <div className="text-right text-white pb-2">
+              <div className="text-right text-white pb-2">
                 <div className="text-2xl font-bold">{employee.votes}</div>
                 <div className="text-blue-100 text-sm">votes</div>
-              </div> */}
+              </div>
             </div>
           </div>
         </motion.div>
@@ -215,7 +257,7 @@ const EmployeeDetails: React.FC = () => {
                 </motion.button>
               )}
 
-              {/* <div className="mt-6 pt-4 border-t border-gray-100">
+              <div className="mt-6 pt-4 border-t border-gray-100">
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-[#464B4B]/60">Current votes</span>
                   <span className="font-semibold text-[#464B4B]">{employee.votes}</span>
@@ -226,7 +268,7 @@ const EmployeeDetails: React.FC = () => {
                     style={{ width: `${Math.min((employee.votes / 200) * 100, 100)}%` }}
                   />
                 </div>
-              </div> */}
+              </div>
             </motion.div>
           </div>
         </div>

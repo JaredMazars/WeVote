@@ -16,7 +16,7 @@ const Home: React.FC = () => {
     {
       icon: Calendar,
       title: "Event Selection",
-      description: "Choose which company events you'd like to see happen",
+      description: "Choose which company resolution you'd like to see happen",
       color: "from-purple-500 to-pink-500"
     },
     {

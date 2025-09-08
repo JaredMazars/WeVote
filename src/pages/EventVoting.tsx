@@ -1,17 +1,50 @@
 import React from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import { events } from '../data/dummyData';
+import apiService from '../services/api';
+import { Event } from '../utils/types';
 import VotingCard from '../components/VotingCard';
 import { Calendar, ArrowLeft, Sparkles, TrendingUp, MapPin } from 'lucide-react';
 
 const EventVoting: React.FC = () => {
   const navigate = useNavigate();
+  const [events, setEvents] = useState<Event[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const totalVotes = events.reduce((sum, event) => sum + event.votes, 0);
-  const mostPopular = events.reduce((prev, current) => 
-    (prev.votes > current.votes) ? prev : current
-  );
+  useEffect(() => {
+    const fetchEvents = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('http://localhost:3001/api/resolutions', {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+        const result = await response.json();
+        console.log("Fetched events:", result);
+        // console.log("Fetched events:", response);
+        if (response.ok) {
+          setEvents(result.data); // Assuming result.data contains the events array
+        } else {
+          setError(result.message || 'Failed to fetch events');
+        }
+      } catch (err) {
+        setError('Failed to fetch events');
+        console.error('Error fetching events:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchEvents();
+  }, []);
+
+  // const totalVotes = events.reduce((sum, event) => sum + event.votes, 0);
+  // const mostPopular = events.reduce((prev, current) => 
+  //   (prev.votes > current.votes) ? prev : current
+  // );
 
   const categories = [...new Set(events.map(event => event.category))];
 
@@ -41,7 +74,7 @@ const EventVoting: React.FC = () => {
                 </div>
                 <div>
                   <h1 className="text-3xl md:text-4xl font-bold text-[#464B4B]">
-                    Upcoming Events
+                    Upcoming Resolutions
                   </h1>
                   <p className="text-[#464B4B]/70">Help decide our next company events</p>
                 </div>
@@ -75,7 +108,7 @@ const EventVoting: React.FC = () => {
                 <TrendingUp className="h-5 w-5 text-green-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#464B4B]">{totalVotes}</p>
+                {/* <p className="text-2xl font-bold text-[#464B4B]">{totalVotes}</p> */}
                 <p className="text-sm text-[#464B4B]/60">Total Votes</p>
               </div>
             </div>
@@ -87,8 +120,8 @@ const EventVoting: React.FC = () => {
                 <Sparkles className="h-5 w-5 text-yellow-600" />
               </div>
               <div>
-                <p className="text-lg font-bold text-[#464B4B] truncate">{mostPopular.title}</p>
-                <p className="text-sm text-[#464B4B]/60">Most popular with {mostPopular.votes} votes</p>
+                {/* <p className="text-lg font-bold text-[#464B4B] truncate">{mostPopular.title}</p>
+                <p className="text-sm text-[#464B4B]/60">Most popular with {mostPopular.votes} votes</p> */}
               </div>
             </div>
           </div>
@@ -115,32 +148,48 @@ const EventVoting: React.FC = () => {
         </motion.div>
 
         {/* Event Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {events.map((event, index) => (
-            <motion.div
-              key={event.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 + index * 0.1 }}
+        {loading ? (
+          <div className="flex justify-center items-center py-12">
+            <div className="w-8 h-8 border-4 border-[#0072CE] border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : error ? (
+          <div className="text-center py-12">
+            <p className="text-red-500 mb-4">{error}</p>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="bg-[#0072CE] text-white px-4 py-2 rounded-lg"
             >
-              <VotingCard
-                id={event.id}
-                title={event.title}
-                subtitle={new Date(event.date).toLocaleDateString('en-US', { 
-                  year: 'numeric', 
-                  month: 'long', 
-                  day: 'numeric' 
-                })}
-                description={event.description}
-                image={event.image}
-                votes={event.votes}
-                type="event"
-                additionalInfo={event.location}
-                onClick={() => navigate(`/event/${event.id}`)}
-              />
-            </motion.div>
-          ))}
-        </div>
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {events.map((event, index) => (
+              <motion.div
+                key={event.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 + index * 0.1 }}
+              >
+                <VotingCard
+                  id={event.id}
+                  title={event.title}
+                  subtitle={new Date(event.date).toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                  })}
+                  description={event.description}
+                  image={event.image}
+                  // votes={event.votes}
+                  type="event"
+                  additionalInfo={event.location}
+                  onClick={() => navigate(`/event/${event.id}`)}
+                />
+              </motion.div>
+            ))}
+          </div>
+        )}
 
         {/* Voting Info */}
         <motion.div
@@ -166,9 +215,9 @@ const EventVoting: React.FC = () => {
             <div>
               <p className="font-medium text-[#464B4B] mb-2">Event details:</p>
               <ul className="space-y-1">
-                <li>• All events scheduled for 2024</li>
+                <li>• All resolution scheduled for 2024</li>
                 <li>• Budget and logistics pre-approved</li>
-                <li>• Top 3 events will be organized</li>
+                <li>• Top 3 resolution will be organized</li>
                 <li>• Results announced end of month</li>
               </ul>
             </div>

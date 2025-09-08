@@ -34,6 +34,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (foundUser && password === 'password123') {
       setUser(foundUser);
       localStorage.setItem('user', JSON.stringify(foundUser));
+      const savedUser = localStorage.getItem('user');
+      console.log("token successful", savedUser);
       setIsLoading(false);
       return true;
     }
