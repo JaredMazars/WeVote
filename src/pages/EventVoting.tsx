@@ -184,7 +184,7 @@ const EventVoting: React.FC = () => {
                   // votes={event.votes}
                   type="event"
                   additionalInfo={event.location}
-                  onClick={() => navigate(`/event/${event.id}`)}
+                  onClick={() => navigate(`/resolutions/${event.id}`)}
                 />
               </motion.div>
             ))}

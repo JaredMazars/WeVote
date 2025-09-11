@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
 import resolutionsRoutes from './routes/resolutions.js';
+import adminRoutes from './routes/admin.js';
 import './config/database.js'; // Ensure database connection is established
 import './middleware/auth.js'; // Ensure auth middleware is loaded
 dotenv.config();
@@ -51,6 +52,7 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/resolutions', resolutionsRoutes);
+app.use('/api/admin', adminRoutes)
 
 // Health check
 app.get('/api/health', (req, res) => {

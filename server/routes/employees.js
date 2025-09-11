@@ -1,7 +1,18 @@
 import express from 'express';
 import Employee from '../models/Employee.js';
 import Vote from '../models/Vote.js';
-import auth from '../middleware/auth.js';
+// import auth from '../middleware/auth.js';
+
+function decodeJWT(token) {
+  try {
+    const payload = token.split('.')[1];
+    const decoded = JSON.parse(atob(payload));
+    return decoded;
+  } catch (error) {
+    console.error('Error decoding token:', error);
+    return null;
+  }
+}
 
 const router = express.Router();
 
@@ -16,9 +27,8 @@ router.param('id', (req, res, next, id) => {
   next();
 });
 
-// IMPORTANT: Specific routes must come before parameterized routes!
 // Get employee voting statistics - THIS MUST COME FIRST
-router.get('/stats/voting',  async (req, res) => {
+router.get('/stats/voting', async (req, res) => {
   try {
     const stats = await Employee.getVotingStats();
     const topPerformers = await Employee.getTopPerformers(3);
@@ -49,7 +59,7 @@ router.get('/stats/voting',  async (req, res) => {
 });
 
 // Get all employees for voting
-router.get('/',  async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const employees = await Employee.getAllForVoting();
 
@@ -85,16 +95,20 @@ router.post('/:id/vote', async (req, res) => {
     const { id } = req.params;
     const { comment } = req.body;
 
-    // Validate id parameter
     if (!id || isNaN(parseInt(id))) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid employee ID'
-      });
+      return res.status(400).json({ success: false, message: 'Invalid employee ID' });
+    }
+
+    const token = req.headers.authorization?.split(' ')[1];
+    const decodedToken = decodeJWT(token);
+    const myId = decodedToken?.id;
+
+    if (!myId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: Invalid token' });
     }
 
     const voteData = {
-      voter_id: req.user.userId,
+      voter_id: myId,
       vote_type: 'employee',
       target_id: parseInt(id),
       comment: comment || null,
@@ -105,29 +119,19 @@ router.post('/:id/vote', async (req, res) => {
 
     const voteId = await Vote.castVote(voteData);
 
-    res.json({
-      success: true,
-      message: 'Vote cast successfully',
-      voteId
-    });
+    res.json({ success: true, message: 'Vote cast successfully', voteId });
   } catch (error) {
     console.error('Error casting vote:', error);
 
     if (error.message.includes('already voted')) {
-      return res.status(409).json({
-        success: false,
-        message: error.message
-      });
+      return res.status(409).json({ success: false, message: error.message });
     }
 
-    res.status(500).json({
-      success: false,
-      message: 'Failed to cast vote'
-    });
+    res.status(500).json({ success: false, message: 'Failed to cast vote' });
   }
 });
 
-// Get single employee with details - THIS MUST COME LAST among parameterized routes
+// Get single employee with details - THIS MUST COME LAST
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -141,6 +145,7 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    // Get employee basic info
     const employee = await Employee.findById(parsedId);
     if (!employee) {
       return res.status(404).json({
@@ -149,13 +154,18 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    // Get achievements and skills in parallel
     const [achievements, skills] = await Promise.all([
       Employee.getAchievements(parsedId),
       Employee.getSkills(parsedId)
     ]);
 
-    const userId = req.user?.userId;
-    // const hasVoted = userId ? await Vote.hasUserVoted(userId, 'employee', parsedId) : false;
+    // Check if user has voted
+    const token = req.headers.authorization?.split(' ')[1];
+    const decodedToken = decodeJWT(token);
+    const myId = decodedToken?.id;
+
+    const hasVoted = myId ? await Vote.hasUserVoted(myId, 'employee', parsedId) : false;
 
     const transformedEmployee = {
       id: employee.id.toString(),
@@ -164,25 +174,27 @@ router.get('/:id', async (req, res) => {
       department: employee.department,
       avatar: employee.avatar,
       bio: employee.bio,
-      achievements: achievements.map(ach => ach.title),
       yearsOfService: employee.years_of_service,
-      skills: skills.map(skill => skill.skill_name),
       votes: employee.total_votes,
-    //   hasVoted
+      achievements: achievements.map(ach => ach.title || ach.description || 'Achievement'),
+      skills: skills.map(skill => skill.skill_name || skill.name || 'Skill'),
+      hasVoted: hasVoted,
     };
+
+    console.log("Transformed Employee:", transformedEmployee);
 
     res.json({
       success: true,
       data: transformedEmployee
     });
+
   } catch (error) {
     console.error('Error fetching employee:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch employee details'
+      message: 'Failed to fetch employee'
     });
   }
 });
-
 
 export default router;

@@ -8,8 +8,10 @@ class ApiService {
   }
 
   private getHeaders(): HeadersInit {
+    const token = localStorage.getItem('token');
     return {
       'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` }),
     };
   }
 
@@ -21,7 +23,7 @@ class ApiService {
     return data;
   }
 
-  // Auth endpoints (still available, but not required)
+  // Auth endpoints
   async login(email: string, password: string) {
     const response = await fetch(`${this.baseURL}/auth/login`, {
       method: 'POST',
@@ -37,6 +39,22 @@ class ApiService {
       method: 'POST',
       headers: this.getHeaders(),
       body: JSON.stringify(userData),
+    });
+
+    return await this.handleResponse(response);
+  }
+
+  // Microsoft OAuth login
+  async loginWithMicrosoft(accessToken: string, user: any) {
+    const response = await fetch(`${this.baseURL}/auth/microsoft`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accessToken,
+        user
+      }),
     });
 
     return await this.handleResponse(response);
@@ -91,7 +109,7 @@ class ApiService {
 
   // Resolution endpoints
   async getresolutions() {
-    const response = await fetch(`http://localhost:3001/api/resolutions`, {
+    const response = await fetch(`${this.baseURL}/resolutions`, {
       method: 'GET',
       headers: this.getHeaders(),
     });
@@ -131,6 +149,22 @@ class ApiService {
     const response = await fetch(`${this.baseURL}/resolutions/stats/voting`, {
       method: 'GET',
       headers: this.getHeaders(),
+    });
+
+    return await this.handleResponse(response);
+  }
+
+  // Vote checking
+  async checkVoteStatus(voterId: string, voteType: string, targetId: string) {
+    const response = await fetch(`${this.baseURL}/votes/check`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        voter_id: voterId,
+        vote_type: voteType,
+        employee_id: voteType === 'employee' ? targetId : null,
+        resolution_id: voteType === 'resolution' ? targetId : null
+      }),
     });
 
     return await this.handleResponse(response);

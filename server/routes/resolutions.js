@@ -1,7 +1,7 @@
 import express from 'express';
 import Resolution from '../models/Resolution.js';
 import Vote from '../models/Vote.js';
-import auth from '../middleware/auth.js';
+// import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -49,7 +49,7 @@ router.get('/',  async (req, res) => {
 
 // Get single Resolution with details
 router.get('/:id',  async (req, res) => {
-  // try {
+  try {
     const { id } = req.params;
     const Resolutions = await Resolution.findatabaseyId(id);
     console.log('Fetched Resolution:', Resolutions);
@@ -61,34 +61,37 @@ router.get('/:id',  async (req, res) => {
       });
     }
 
-    // const hasVoted = await Vote.hasUserVoted(req.user.userId, 'Resolution', id);
+    const userId = 1
+    const hasVoted = await Vote.hasUserVoted(userId, 'event', id);
 
-  //   const transformedEvent = {
-  //     id: Resolution.id.toString(),
-  //     title: Resolution.title,
-  //     description: Resolution.description,
-  //     date: Resolution.event_date,
-  //     location: Resolution.location,
-  //     image: Resolution.image_url,
-  //     organizer: Resolution.organizer,
-  //     category: Resolution.category,
-  //     votes: Resolution.total_votes,
-  //     details: Resolution.details || Resolution.description,
-  //     // hasVoted
-  //   };
-
-  //   res.json({
-  //     success: true,
-  //     data: transformedEvent
-  //   });
-  // } catch (error) {
-  //   console.error('Error fetching Resolution:', error);
-  //   res.status(500).json({
-  //     success: false,
-  //     message: 'Failed to fetch Resolution details'
-  //   });
-  // }
+    const transformedEvent = {
+        id: Resolutions.id,
+        title: Resolutions.title,
+        description: Resolutions.description,
+        date: Resolutions.event_date,
+        location: Resolutions.location,
+        image: Resolutions.image_url,
+        organizer: Resolutions.organizer,
+        category: Resolutions.category,
+        votes: Resolutions.total_votes,
+        details: Resolutions.details || Resolutions.description,
+        hasVoted
+      };
+      
+      res.json({
+        success: true,
+        data: transformedEvent
+      });
+    } catch (error) {
+    console.error('Error fetching Resolution:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Resolution details'
+    });
+  }
 });
+
+
 
 // Vote for Resolution
 router.post('/:id/vote',  async (req, res) => {
@@ -96,14 +99,28 @@ router.post('/:id/vote',  async (req, res) => {
     const { id } = req.params;
     const { comment } = req.body;
 
+    // Validate id parameter
+    const parsedId = parseInt(id, 10);
+    if (!parsedId || isNaN(parsedId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid employee ID'
+      });
+    }
+
+    
+    const userId = 1
+    const hasVoted = userId ? await Vote.hasUserVoted(userId, 'event', parsedId) : false;
+   
     const voteData = {
-      voter_id: req.user.userId,
-      vote_type: 'Resolution',
+      voter_id: 1,
+      vote_type: 'event',
       target_id: parseInt(id),
       comment: comment || null,
       is_anonymous: 1,
       ip_address: req.ip,
-      user_agent: req.get('User-Agent')
+      user_agent: req.get('User-Agent'),
+      hasVoted: hasVoted
     };
 
     const voteId = await Vote.castVote(voteData);

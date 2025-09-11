@@ -1,10 +1,13 @@
 import React from 'react';
-import { LogOut, User, Vote } from 'lucide-react';
+import { LogOut, Shield, User, Vote } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 
 const Header: React.FC = () => {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
 
   return (
     <motion.header 
@@ -16,7 +19,8 @@ const Header: React.FC = () => {
         <div className="flex justify-between items-center h-16">
           <motion.div 
             className="flex items-center space-x-3"
-            whileHover={{ scale: 1.05 }}
+            whileHover={{ scale: 1.05 }} 
+            onClick={() => navigate('/home')}
           >
             <div className="bg-white/20 p-2 rounded-lg backdrop-blur-sm">
               <Vote className="h-6 w-6" />
@@ -29,6 +33,17 @@ const Header: React.FC = () => {
 
           {user && (
             <div className="flex items-center space-x-4">
+              {user.role === 'admin' && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={() => navigate('/admin')}
+                  className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-all duration-200 backdrop-blur-sm flex items-center space-x-2"
+                >
+                  <Shield className="h-4 w-4" />
+                  <span className="text-sm font-medium hidden sm:block">Admin</span>
+                </motion.button>
+              )}
               <div className="flex items-center space-x-3">
                 <div className="text-right">
                   <p className="text-sm font-medium">{user.name}</p>

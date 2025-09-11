@@ -160,7 +160,7 @@ const EmployeeVoting: React.FC = () => {
                   image={employee.avatar}
                   type="employee"
                   additionalInfo={employee.position}
-                  onClick={() => navigate(`/employee/${employee.id}`)}
+                  onClick={() => navigate(`/employees/${employee.id}`)}
                 />
               </motion.div>
             ))}
