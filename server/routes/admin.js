@@ -1,10 +1,11 @@
 import express from 'express';
 import User from '../models/User.js';
 import Employee from '../models/Employee.js';
-// import Vote from '../models/Vote.js';
+import Vote from '../models/Vote.js';
 // import auth from '../middleware/auth.js';
 import { body, validationResult } from 'express-validator';
 import Resolution from '../models/Resolution.js';
+
 
 const router = express.Router();
 
@@ -19,145 +20,218 @@ const requireAdmin = (req, res, next) => {
     // next();
 };
 
-// // Get dashboard statistics
-// router.get('/stats',  requireAdmin, async (req, res) => {
-//     try {
-//         const [userStats, voteStats, eventStats, employeeStats] = await Promise.all([
-//             User.getAll(),
-//             Vote.getVoteStats(),
-//             Event.getVotingStats(),
-//             Employee.getVotingStats()
-//         ]);
+let agmTimer = {
+  active: false,
+  start: '00:30',
+  end: '11:00',
+  startedAt: null
+};
 
-//         const recentVotes = await Vote.getRecentVotes(50);
-//         const oneWeekAgo = new Date();
-//         oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-        
-//         const recentActivity = recentVotes.filter(vote => 
-//             new Date(vote.created_at) >= oneWeekAgo
-//         ).length;
+// Start AGM timer
+router.post('/agm-timer/start', (req, res) => {
+  agmTimer.active = true;
+  agmTimer.startedAt = new Date();
+  agmTimer.start = req.body.start || '12:00';
+  agmTimer.end = req.body.end || '00:00';
+  res.json({ success: true, agmTimer });
+});
 
-//         // Calculate voting trends
-//         const employeeVoteCount = voteStats.find(stat => stat.vote_type === 'employee')?.total_votes || 0;
-//         const eventVoteCount = voteStats.find(stat => stat.vote_type === 'event')?.total_votes || 0;
+// End AGM timer
+router.post('/agm-timer/end', (req, res) => {
+  agmTimer.active = false;
+  agmTimer.startedAt = null;
+  res.json({ success: true, agmTimer });
+});
 
-//         const stats = {
-//             totalUsers: userStats.length,
-//             totalVotes: employeeVoteCount + eventVoteCount,
-//             totalEvents: eventStats.total_events || 0,
-//             totalEmployees: employeeStats.total_employees || 0,
-//             recentActivity,
-//             votingTrends: {
-//                 employeeVotes: employeeVoteCount,
-//                 eventVotes: eventVoteCount
-//             }
-//         };
+// Get AGM timer status
+router.get('/agm-timer/status', (req, res) => {
+  res.json({ success: true, agmTimer });
+});
 
-//         res.json({
-//             success: true,
-//             data: stats
-//         });
+router.post('/:id/approve', async (req, res) => {
 
-//     } catch (error) {
-//         console.error('Error fetching dashboard stats:', error);
-//         res.status(500).json({ 
-//             success: false, 
-//             message: 'Failed to fetch dashboard statistics' 
-//         });
-//     }
-// });
+  try {
+    const { id } = req.params;
 
-// // Get all vote logs with detailed information
-// router.get('/logs',  requireAdmin, async (req, res) => {
-//     try {
-//         const { page = 1, limit = 50, search, voteType, dateFrom, dateTo } = req.query;
-        
-//         let sql = `
-//             SELECT v.id, v.vote_type, v.created_at, v.comment, v.is_anonymous,
-//                    v.ip_address, v.user_agent,
-//                    voter.name as voter_name, voter.id as voter_id,
-//                    CASE 
-//                        WHEN v.vote_type = 'employee' THEN emp_user.name
-//                        WHEN v.vote_type = 'event' THEN e.title
-//                    END as target_name,
-//                    CASE 
-//                        WHEN v.vote_type = 'employee' THEN v.employee_id
-//                        WHEN v.vote_type = 'event' THEN v.event_id
-//                    END as target_id
-//             FROM votes v
-//             JOIN users voter ON v.voter_id = voter.id
-//             LEFT JOIN employees emp ON v.employee_id = emp.id
-//             LEFT JOIN users emp_user ON emp.user_id = emp_user.id
-//             LEFT JOIN events e ON v.event_id = e.id
-//             WHERE 1=1
-//         `;
-        
-//         const params = [];
-        
-//         // Add search filter
-//         if (search) {
-//             sql += ` AND (voter.name LIKE ? OR emp_user.name LIKE ? OR e.title LIKE ?)`;
-//             params.push(`%${search}%`, `%${search}%`, `%${search}%`);
-//         }
-        
-//         // Add vote type filter
-//         if (voteType && voteType !== 'all') {
-//             sql += ` AND v.vote_type = ?`;
-//             params.push(voteType);
-//         }
-        
-//         // Add date filters
-//         if (dateFrom) {
-//             sql += ` AND DATE(v.created_at) >= ?`;
-//             params.push(dateFrom);
-//         }
-        
-//         if (dateTo) {
-//             sql += ` AND DATE(v.created_at) <= ?`;
-//             params.push(dateTo);
-//         }
-        
-//         sql += ` ORDER BY v.created_at DESC LIMIT ? OFFSET ?`;
-//         params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
-        
-//         const db = require('../config/database');
-//         const logs = await db.query(sql, params);
-        
-//         // Transform data for frontend
-//         const transformedLogs = logs.map(log => ({
-//             id: log.id.toString(),
-//             voterName: log.voter_name,
-//             voterId: log.voter_id.toString(),
-//             voteType: log.vote_type,
-//             targetName: log.target_name,
-//             targetId: log.target_id?.toString(),
-//             timestamp: log.created_at,
-//             ipAddress: log.ip_address,
-//             userAgent: log.user_agent,
-//             comment: log.comment,
-//             isAnonymous: Boolean(log.is_anonymous)
-//         }));
+    const parsedId = parseInt(id, 10);
+    if(!parsedId || isNaN(parsedId)) {
+      return  res.status(400).json({
+        success: false,
+        message: 'Invalid user ID'
+      });
+    }
+    const userId = parsedId;
+    await User.approveUserById(userId);
+    res.json({
+      success: true,
+      message: 'User approved successfully'
+    });
+  } catch (error) {
+    console.error('Error approving user:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to approve user'
+    });
+  }
+});
 
-//         res.json({
-//             success: true,
-//             data: transformedLogs,
-//             pagination: {
-//                 page: parseInt(page),
-//                 limit: parseInt(limit),
-//                 total: transformedLogs.length
-//             }
-//         });
 
-//     } catch (error) {
-//         console.error('Error fetching vote logs:', error);
-//         res.status(500).json({ 
-//             success: false, 
-//             message: 'Failed to fetch vote logs' 
-//         });
-//     }
-// });
+// Get dashboard statistics
+router.get('/stats',  requireAdmin, async (req, res) => {
+    try {
+        const [userStats, voteStats, eventStats, employeeStats] = await Promise.all([
+            User.getAll(),
+            Vote.getVoteStats(),
+            Event.getVotingStats(),
+            Employee.getVotingStats()
+        ]);
+
+        const recentVotes = await Vote.getRecentVotes(50);
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+        
+        const recentActivity = recentVotes.filter(vote => 
+            new Date(vote.created_at) >= oneWeekAgo
+        ).length;
+
+        // Calculate voting trends
+        const employeeVoteCount = voteStats.find(stat => stat.vote_type === 'employee')?.total_votes || 0;
+        const eventVoteCount = voteStats.find(stat => stat.vote_type === 'event')?.total_votes || 0;
+
+        const stats = {
+            totalUsers: userStats.length,
+            totalVotes: employeeVoteCount + eventVoteCount,
+            totalEvents: eventStats.total_events || 0,
+            totalEmployees: employeeStats.total_employees || 0,
+            recentActivity,
+            votingTrends: {
+                employeeVotes: employeeVoteCount,
+                eventVotes: eventVoteCount
+            }
+        };
+
+        res.json({
+            success: true,
+            data: stats
+        });
+
+    } catch (error) {
+        console.error('Error fetching dashboard stats:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to fetch dashboard statistics' 
+        });
+    }
+});
+
+// Get all votes for a user by userId
+router.get('/votes/user/:userId', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        if (!userId) {
+            return res.status(400).json({ success: false, message: 'User ID required' });
+        }
+        const votes = await Vote.getVoteStatusByUserId(userId);
+        res.json({ success: true, data: votes });
+    } catch (error) {
+        console.error('Error fetching user votes:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch user votes' });
+    }
+});
+
+// Get all vote logs with detailed information
+router.get('/logs',  requireAdmin, async (req, res) => {
+    try {
+        const { page = 1, limit = 50, search, voteType, dateFrom, dateTo } = req.query;
+        
+        let sql = `
+            SELECT v.id, v.vote_type, v.created_at, v.comment, v.is_anonymous,
+                   v.ip_address, v.user_agent,
+                   voter.name as voter_name, voter.id as voter_id,
+                   CASE 
+                       WHEN v.vote_type = 'employee' THEN emp_user.name
+                       WHEN v.vote_type = 'event' THEN e.title
+                   END as target_name,
+                   CASE 
+                       WHEN v.vote_type = 'employee' THEN v.employee_id
+                       WHEN v.vote_type = 'event' THEN v.event_id
+                   END as target_id
+            FROM votes v
+            JOIN users voter ON v.voter_id = voter.id
+            LEFT JOIN employees emp ON v.employee_id = emp.id
+            LEFT JOIN users emp_user ON emp.user_id = emp_user.id
+            LEFT JOIN events e ON v.event_id = e.id
+            WHERE 1=1
+        `;
+        
+        const params = [];
+        
+        // Add search filter
+        if (search) {
+            sql += ` AND (voter.name LIKE ? OR emp_user.name LIKE ? OR e.title LIKE ?)`;
+            params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        }
+        
+        // Add vote type filter
+        if (voteType && voteType !== 'all') {
+            sql += ` AND v.vote_type = ?`;
+            params.push(voteType);
+        }
+        
+        // Add date filters
+        if (dateFrom) {
+            sql += ` AND DATE(v.created_at) >= ?`;
+            params.push(dateFrom);
+        }
+        
+        if (dateTo) {
+            sql += ` AND DATE(v.created_at) <= ?`;
+            params.push(dateTo);
+        }
+        
+        sql += ` ORDER BY v.created_at DESC LIMIT ? OFFSET ?`;
+        params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
+        
+        const db = require('../config/database');
+        const logs = await db.query(sql, params);
+        
+        // Transform data for frontend
+        const transformedLogs = logs.map(log => ({
+            id: log.id.toString(),
+            voterName: log.voter_name,
+            voterId: log.voter_id.toString(),
+            voteType: log.vote_type,
+            targetName: log.target_name,
+            targetId: log.target_id?.toString(),
+            timestamp: log.created_at,
+            ipAddress: log.ip_address,
+            userAgent: log.user_agent,
+            comment: log.comment,
+            isAnonymous: Boolean(log.is_anonymous)
+        }));
+
+        res.json({
+            success: true,
+            data: transformedLogs,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total: transformedLogs.length
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching vote logs:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to fetch vote logs' 
+        });
+    }
+});
 
 // Get all users for admin management
+
+
 router.get('/users', async (req, res) => {
     try {
         const users = await User.getAll();
@@ -169,10 +243,18 @@ router.get('/users', async (req, res) => {
             email: user.email,
             role: user.role_name?.toLowerCase() || 'voter',
             avatar: user.avatar_url,
-            isActive: Boolean(user.is_active),
+            // isActive: Boolean(user.is_active),
             lastLogin: user.last_login,
             createdAt: user.created_at, 
-            updatedAt: user.updated_at
+            updatedAt: user.updated_at,
+            active: user.is_active[0],
+            goodStandingIdNumber: user.good_standing,
+            // Vote weight and limits
+            vote_weight: user.vote_weight || 1.0,
+            max_votes_allowed: user.max_votes_allowed || 1,
+            min_votes_required: user.min_votes_required || 1,
+            vote_limit_set_by: user.vote_limit_set_by,
+            vote_limit_updated_at: user.vote_limit_updated_at
         }));
 
         res.json({
@@ -190,33 +272,33 @@ router.get('/users', async (req, res) => {
 });
 
 
-router.post('/users', async (req, res) => {
-  try {
-    const { email, name, password, role_id } = req.body;
+// router.post('/users', async (req, res) => {
+//   try {
+//     const { email, name, password, role_id } = req.body;
     
-    if (!name || !email ||!password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Name and email required' 
-      });
-    }
+//     if (!name || !email ||!password) {
+//       return res.status(400).json({ 
+//         success: false, 
+//         message: 'Name and email required' 
+//       });
+//     }
 
-    const userId = await User.create({ email, name, password, role_id});
+//     const userId = await User.create({ email, name, password, role_id});
     
-    res.json({
-      success: true,
-      message: 'User created',
-      data: { userId }
-    });
+//     res.json({
+//       success: true,
+//       message: 'User created',
+//       data: { userId }
+//     });
     
-  } catch (error) {
-    console.error('Error:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message 
-    });
-  }
-});
+//   } catch (error) {
+//     console.error('Error:', error);
+//     res.status(500).json({ 
+//       success: false, 
+//       message: error.message 
+//     });
+//   }
+// });
 
 
 // Update user (admin only)
@@ -255,6 +337,167 @@ router.put('/users/:id', [
         res.status(500).json({ 
             success: false, 
             message: 'Failed to update user' 
+        });
+    }
+});
+
+// Update user vote weight and limits (admin only - within super admin boundaries)
+router.put('/users/:id/vote-limits', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { vote_weight, max_votes_allowed, min_votes_required } = req.body;
+
+        // Get super admin limits
+        const limitsQuery = `
+            SELECT min_individual_votes, max_individual_votes 
+            FROM vote_splitting_settings 
+            WHERE setting_name = 'proxy_vote_splitting'
+        `;
+        const limitsResult = await User.executeQuery(limitsQuery);
+        
+        let superAdminLimits = {
+            min_individual_votes: 1,
+            max_individual_votes: 3
+        };
+
+        if (limitsResult && limitsResult.length > 0) {
+            superAdminLimits = {
+                min_individual_votes: limitsResult[0].min_individual_votes,
+                max_individual_votes: limitsResult[0].max_individual_votes
+            };
+        }
+
+        // Validate against super admin boundaries
+        if (vote_weight && (vote_weight < 0.1 || vote_weight > 10)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Vote weight must be between 0.1 and 10'
+            });
+        }
+
+        if (max_votes_allowed && 
+            (max_votes_allowed < superAdminLimits.min_individual_votes || 
+             max_votes_allowed > superAdminLimits.max_individual_votes)) {
+            return res.status(400).json({
+                success: false,
+                message: `Max votes must be between ${superAdminLimits.min_individual_votes} and ${superAdminLimits.max_individual_votes} (set by super admin)`
+            });
+        }
+
+        if (min_votes_required && 
+            (min_votes_required < superAdminLimits.min_individual_votes || 
+             min_votes_required > (max_votes_allowed || superAdminLimits.max_individual_votes))) {
+            return res.status(400).json({
+                success: false,
+                message: `Min votes must be between ${superAdminLimits.min_individual_votes} and max votes allowed`
+            });
+        }
+
+        // Get current user (admin) info from token
+        const adminId = req.user?.id || 'system';
+        const adminEmail = req.user?.email || 'admin';
+
+        // Update user vote limits
+        const updateQuery = `
+            UPDATE users 
+            SET 
+                vote_weight = ${vote_weight || 1.0},
+                max_votes_allowed = ${max_votes_allowed || 1},
+                min_votes_required = ${min_votes_required || 1},
+                vote_limit_set_by = '${adminEmail}',
+                vote_limit_updated_at = GETDATE()
+            WHERE id = ${id}
+        `;
+
+        await User.executeQuery(updateQuery);
+
+        res.json({
+            success: true,
+            message: 'User vote limits updated successfully',
+            data: {
+                vote_weight: vote_weight || 1.0,
+                max_votes_allowed: max_votes_allowed || 1,
+                min_votes_required: min_votes_required || 1,
+                boundaries: superAdminLimits
+            }
+        });
+
+    } catch (error) {
+        console.error('Error updating user vote limits:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to update user vote limits: ' + error.message 
+        });
+    }
+});
+
+// Get user vote limits
+router.get('/users/:id/vote-limits', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const query = `
+            SELECT 
+                id,
+                name,
+                email,
+                vote_weight,
+                max_votes_allowed,
+                min_votes_required,
+                vote_limit_set_by,
+                vote_limit_updated_at
+            FROM users
+            WHERE id = ${id}
+        `;
+
+        const result = await User.executeQuery(query);
+
+        if (!result || result.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        const user = result[0];
+
+        // Also get super admin boundaries
+        const limitsQuery = `
+            SELECT min_individual_votes, max_individual_votes 
+            FROM vote_splitting_settings 
+            WHERE setting_name = 'proxy_vote_splitting'
+        `;
+        const limitsResult = await User.executeQuery(limitsQuery);
+        
+        const superAdminLimits = limitsResult && limitsResult.length > 0 
+            ? {
+                min_individual_votes: limitsResult[0].min_individual_votes,
+                max_individual_votes: limitsResult[0].max_individual_votes
+              }
+            : { min_individual_votes: 1, max_individual_votes: 3 };
+
+        res.json({
+            success: true,
+            data: {
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    vote_weight: user.vote_weight || 1.0,
+                    max_votes_allowed: user.max_votes_allowed || 1,
+                    min_votes_required: user.min_votes_required || 1,
+                    vote_limit_set_by: user.vote_limit_set_by,
+                    vote_limit_updated_at: user.vote_limit_updated_at
+                },
+                super_admin_boundaries: superAdminLimits
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching user vote limits:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: 'Failed to fetch user vote limits' 
         });
     }
 });
@@ -572,6 +815,19 @@ router.delete('/resolutions/:id', async (req, res) => {
         });
     }
 });
+
+router.get('/votes/logs', async (req, res) => {
+  const { search = '', type = 'all' } = req.query;
+
+  try {
+    const logs = await Vote.getVoteLogs(search, type);
+    res.json({ success: true, logs });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch vote logs' });
+  }
+});
+
+
 
 
 

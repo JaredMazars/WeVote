@@ -76,7 +76,7 @@ const EventVoting: React.FC = () => {
                   <h1 className="text-3xl md:text-4xl font-bold text-[#464B4B]">
                     Upcoming Resolutions
                   </h1>
-                  <p className="text-[#464B4B]/70">Help decide our next company events</p>
+                  <p className="text-[#464B4B]/70">Help decide our next company Resolution</p>
                 </div>
               </div>
             </div>

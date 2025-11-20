@@ -7,6 +7,27 @@ import { Employee } from '../utils/types';
 import VotingCard from '../components/VotingCard';
 import { Users, ArrowLeft, Award, TrendingUp } from 'lucide-react';
 
+interface VotingCardProps {
+  id: string;
+  title: string;
+  subtitle?: string;
+  description?: string;
+  image?: string;
+  type?: 'employee' | 'resolution';
+  additionalInfo?: string;
+  onClick?: () => void;
+}
+
+function isVotingOpenNow(timer?: { active: boolean; start: string; end: string }) {
+  if (!timer || !timer.active) return false;
+  const now = new Date();
+  const [startH, startM] = timer.start.split(':').map(Number);
+  const [endH, endM] = timer.end.split(':').map(Number);
+  const start = new Date(now); start.setHours(startH, startM, 0, 0);
+  const end = new Date(now); end.setHours(endH, endM, 0, 0);
+  return now >= start && now <= end;
+}
+
 const EmployeeVoting: React.FC = () => {
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -75,7 +96,7 @@ const EmployeeVoting: React.FC = () => {
                 </div>
                 <div>
                   <h1 className="text-3xl md:text-4xl font-bold text-[#464B4B]">
-                    Employee Recognition
+                    Candidate Voting
                   </h1>
                   <p className="text-[#464B4B]/70">Vote for outstanding team members</p>
                 </div>

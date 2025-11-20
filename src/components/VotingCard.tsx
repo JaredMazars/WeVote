@@ -98,6 +98,13 @@ const VotingCard: React.FC<VotingCardProps> = ({
           >
             View Details
           </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            className="bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white px-4 py-2 rounded-lg text-sm font-medium hover:shadow-lg transition-all duration-200"
+          >
+            Vote
+          </motion.button>
           {/* <div className="text-right">
             <div className="text-xs text-[#464B4B]/60">Popularity</div>
             <div className="flex items-center">

@@ -4,17 +4,23 @@ import { Configuration, PublicClientApplication } from '@azure/msal-browser';
 export const msalConfig: Configuration = {
   auth: {
     clientId: import.meta.env.VITE_MICROSOFT_CLIENT_ID || 'your-client-id-here',
-    // Use your specific tenant ID instead of 'common' for better security
-    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_MICROSOFT_TENANT_ID || 'common'}`,
-    redirectUri: window.location.origin,
+    // Use 'common' for multi-tenant support
+    authority: `https://login.microsoftonline.com/${import.meta.env.VITE_MICROSOFT_TENANT_ID || 'organizations'}`,
+    redirectUri: `${window.location.origin}/`,
     postLogoutRedirectUri: window.location.origin,
+    navigateToLoginRequestUrl: false,
   },
   cache: {
-    cacheLocation: 'sessionStorage',
-    storeAuthStateInCookie: false,
+    cacheLocation: 'localStorage', // Changed from sessionStorage
+    storeAuthStateInCookie: true, // Changed to true for better popup support
   },
   system: {
+    // allowNativeBroker: false, // Disable native broker
+    windowHashTimeout: 60000, // Increase timeout
+    iframeHashTimeout: 6000,
+    loadFrameTimeout: 0,
     loggerOptions: {
+      logLevel: 3, // Verbose logging for debugging
       loggerCallback: (level, message, containsPii) => {
         if (containsPii) {
           return;
@@ -41,8 +47,16 @@ export const msalConfig: Configuration = {
 // Create MSAL instance
 export const msalInstance = new PublicClientApplication(msalConfig);
 
+// Initialize MSAL
+msalInstance.initialize().then(() => {
+  console.log('MSAL initialized successfully');
+}).catch((error) => {
+  console.error('MSAL initialization failed:', error);
+});
 // Login request configuration
 export const loginRequest = {
-  scopes: ['User.Read', 'profile', 'email', 'openid'],
-  prompt: 'select_account', // Forces account selection
+  scopes: ['User.Read'], // Minimal scopes to avoid permission issues
+  prompt: 'select_account',
+  forceRefresh: false,
+  redirectUri: `${window.location.origin}/`,
 };

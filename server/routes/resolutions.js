@@ -51,7 +51,7 @@ router.get('/',  async (req, res) => {
 router.get('/:id',  async (req, res) => {
   try {
     const { id } = req.params;
-    const Resolutions = await Resolution.findatabaseyId(id);
+    const Resolutions = await Resolution.findById(id);
     console.log('Fetched Resolution:', Resolutions);
 
     if (!Resolutions) {
@@ -94,33 +94,49 @@ router.get('/:id',  async (req, res) => {
 
 
 // Vote for Resolution
-router.post('/:id/vote',  async (req, res) => {
+router.post('/:id/vote', async (req, res) => {
   try {
     const { id } = req.params;
-    const { comment } = req.body;
+    const { comment, vote_choice } = req.body; // NEW: accept vote_choice
 
     // Validate id parameter
     const parsedId = parseInt(id, 10);
     if (!parsedId || isNaN(parsedId)) {
       return res.status(400).json({
         success: false,
-        message: 'Invalid employee ID'
+        message: 'Invalid resolution ID'
       });
     }
 
+    // Validate vote_choice
+    if (!vote_choice || !['YES', 'NO', 'ABSTAIN'].includes(vote_choice)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid vote choice. Must be YES, NO, or ABSTAIN'
+      });
+    }
+
+    const userId = 1; // TODO: Get from authentication
     
-    const userId = 1
-    const hasVoted = userId ? await Vote.hasUserVoted(userId, 'event', parsedId) : false;
-   
+    // Check if user has already voted
+    const hasVoted = await Vote.hasUserVoted(userId, 'resolution', parsedId);
+    
+    if (hasVoted) {
+      return res.status(409).json({
+        success: false,
+        message: 'You have already voted for this resolution'
+      });
+    }
+
     const voteData = {
-      voter_id: 1,
-      vote_type: 'event',
-      target_id: parseInt(id),
+      voter_id: userId,
+      vote_type: 'resolution',
+      target_id: parsedId,
+      vote_choice: vote_choice, // NEW
       comment: comment || null,
-      is_anonymous: 1,
+      is_anonymous: true,
       ip_address: req.ip,
-      user_agent: req.get('User-Agent'),
-      hasVoted: hasVoted
+      user_agent: req.get('User-Agent')
     };
 
     const voteId = await Vote.castVote(voteData);
@@ -142,10 +158,42 @@ router.post('/:id/vote',  async (req, res) => {
 
     res.status(500).json({
       success: false,
-      message: 'Failed to cast vote'
+      message: 'Failed to cast vote',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
+
+
+router.get('/:resolutionId/votes', async (req, res) => {
+  try {
+    const { resolutionId } = req.params;
+    
+    if (!resolutionId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Resolution ID is required'
+      });
+    }
+
+    const voteStatus = await Resolution.getVoteStatusByResolutionId(resolutionId);
+    
+    res.json(voteStatus);
+
+  } catch (error) {
+    console.error('Resolution vote status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while checking resolution vote status',
+      data: {
+        totalVotes: 0,
+        totalVoteCount: 0,
+        voters: []
+      }
+    });
+  }
+});
+
 
 // Get Resolution categories
 router.get('/categories/all',  async (req, res) => {

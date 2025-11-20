@@ -12,13 +12,13 @@ export const auth = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Verify user still exists and is active
-    const results = await database.query(
-      `SELECT id, email, is_active FROM users WHERE id = ${decoded.userId}`
+
+    // Use parameterized query and 'id' from payload
+    const [users] = await database.query(
+      `SELECT id, email, is_active FROM users WHERE id = ${decoded.id}`,
     );
 
-    if (!results || results.length === 0 || !results[0].is_active) {
+    if (!users.length || !users[0].is_active) {
       return res.status(401).json({
         success: false,
         message: 'Invalid token or user not active'
@@ -26,10 +26,10 @@ export const auth = async (req, res, next) => {
     }
 
     req.user = {
-      userId: results[0].id,
-      email: results[0].email
+      id: users[0].id,
+      email: users[0].email
     };
-    
+
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
@@ -39,3 +39,5 @@ export const auth = async (req, res, next) => {
     });
   }
 };
+
+export default auth;

@@ -1,4 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users,
@@ -37,9 +40,14 @@ import {
   ChevronUp,
   ExternalLink,
   Info,
-  XCircle
+  XCircle,
+  Mail,
+  Lock,
+  User,
+  Crown
 } from 'lucide-react';
 import apiService from '../services/api';
+import SuperUsersManagement from '../components/SuperUsersManagement';
 // import AuditService from '../services/auditService';
 // import ProxyService from '../services/proxyService';
 import { AuditLog, ProxyGroup, ProxyVote } from '../types/audit';
@@ -91,17 +99,18 @@ interface Resolution {
 
 interface VoteLog {
   id: string;
-  voter_name: string;
   voter_id: string;
-  vote_type: 'employee' | 'resolution';
-  target_name: string;
-  target_id: string;
-  created_at: string;
-  ip_address?: string;
-  user_agent?: string;
+  voter_name?: string;
+  voter_email?: string;
+  vote_type: string;
+  employee_id?: string;
+  resolution_id?: string;
+  vote_weight: number;
+  vote_choice?: string;
   comment?: string;
   is_anonymous: boolean;
-  vote_weight: number;
+  ip_address?: string;
+  created_at: string;
 }
 
 interface DashboardStats {
@@ -119,8 +128,14 @@ interface DashboardStats {
   totalAuditLogs: number;
 }
 
-const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'analytics' | 'users' | 'employees' | 'resolutions' | 'votes' | 'audit' | 'proxy'>('analytics');
+const AdminDashboard_2: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  
+  // Check if user is super admin (role_id = 0)
+  const isSuperAdmin = user?.role_id === "0" || user?.role_id === 0 || (typeof user?.role_id === 'number' && user.role_id === 0);
+  
+  const [activeTab, setActiveTab] = useState< 'users' | 'employees' | 'resolutions' | 'votes' | 'audit' | 'proxy' | 'register' | 'super-users'>('users');
   const [stats, setStats] = useState<DashboardStats>({
     totalUsers: 0,
     totalVotes: 0,
@@ -163,6 +178,16 @@ const AdminDashboard: React.FC = () => {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editingResolution, setEditingResolution] = useState<any>(null);
   
+  // Registration states
+  const [registrationData, setRegistrationData] = useState({
+    name: '',
+    email: '',
+    role_id: 2, // Default to voter
+  });
+  const [registrationError, setRegistrationError] = useState('');
+  const [registrationSuccess, setRegistrationSuccess] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+
   const [newUser, setNewUser] = useState({
     name: '',
     email: '',
@@ -197,9 +222,27 @@ const AdminDashboard: React.FC = () => {
     member_ids: [] as string[],
   });
 
+  const [showAgmTimerModal, setShowAgmTimerModal] = useState(false);
+  const [agmStartTime, setAgmStartTime] = useState('15:00');
+  const [agmEndTime, setAgmEndTime] = useState('17:00');
+  const [agmModalError, setAgmModalError] = useState('');
+
 //   const auditService = AuditService.getInstance();
 
   useEffect(() => {
+    const fetchLogs = async () => {
+    try {
+      const response = await fetch(`http://localhost:3001/api/admin/votes/logs`);
+      const data = await response.json();
+      if (data.success) {
+        setVoteLogs(data.logs);
+      }
+    } catch (error) {
+      console.error('Error loading vote logs:', error);
+    }
+  };
+
+    fetchLogs();
     fetchDashboardData();
     fetchUsers();
     fetchEmployees();
@@ -245,7 +288,7 @@ const AdminDashboard: React.FC = () => {
 //     new_values: { name: 'Mike Wilson', email: 'mike@company.com', role: 'voter' },
 //     user_name: 'John Admin',
 //     user_id: 'admin_1',
-//     created_at: '2025-01-15T10:30:00Z',
+//     created_at: '2025-01-15T09:30:00Z',
 //     ip_address: '192.168.1.50',
 //     user_agent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
 //     description: 'New user account created'
@@ -297,6 +340,47 @@ const AdminDashboard: React.FC = () => {
 
   }, []);
 
+
+  const fetchVoteLogs = async () => {
+  try {
+    const token = localStorage.getItem('token');
+    const response = await fetch(
+      `http://localhost:3001/api/admin/votes/logs?search=${searchTerm}&type=${filterType}`,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+    const data = await response.json();
+    if (data.success) {
+      setVoteLogs(data.logs);
+    }
+  } catch (error) {
+    console.error('Error loading vote logs:', error);
+  }
+};
+
+// Update your useEffect
+useEffect(() => {
+  fetchVoteLogs();
+  fetchDashboardData();
+  fetchUsers();
+  fetchEmployees();
+  fetchResolutions();
+  fetchProxyGroups();
+  fetchProxyVotes();
+}, []);
+
+// Refetch when search or filter changes
+useEffect(() => {
+  if (activeTab === 'votes') {
+    fetchVoteLogs();
+  }
+}, [searchTerm, filterType]);
+
+
+
   const fetchUsers = async () => {
     try {
       setLoading(true);
@@ -306,6 +390,7 @@ const AdminDashboard: React.FC = () => {
           'Content-Type': 'application/json'
         }
       }); 
+      
 
       const result = await response.json(); 
       console.log("Fetched users", result);
@@ -321,6 +406,7 @@ const AdminDashboard: React.FC = () => {
       setLoading(false);
     }
   };
+  
 
   const fetchEmployees = async () => {
     try {
@@ -404,6 +490,70 @@ const AdminDashboard: React.FC = () => {
       setError('Error fetching dashboard data: ' + err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRegistration = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsRegistering(true);
+    setRegistrationError('');
+    setRegistrationSuccess('');
+
+    // Validation
+    if (!registrationData.name || !registrationData.email) {
+      setRegistrationError('Name and email are required');
+      setIsRegistering(false);
+      return;
+    }
+
+    if (registrationData.name.length < 2) {
+      setRegistrationError('Name must be at least 2 characters');
+      setIsRegistering(false);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(registrationData.email)) {
+      setRegistrationError('Please enter a valid email address');
+      setIsRegistering(false);
+      return;
+    }
+
+    try {
+      const userData = {
+        name: registrationData.name,
+        email: registrationData.email,
+        role_id: registrationData.role_id,
+        avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(registrationData.name)}&background=0072CE&color=fff`
+      };
+
+      const response = await fetch('http://localhost:3001/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(userData)
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        setRegistrationSuccess('Account created successfully! A password has been sent to the user\'s email address.');
+        setRegistrationData({
+          name: '',
+          email: '',
+          role_id: 2
+        });
+        // Refresh users list
+        await fetchUsers();
+      } else {
+        setRegistrationError(result.message || 'Registration failed. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('Registration error:', error);
+      setRegistrationError('Registration failed. Please try again.');
+    } finally {
+      setIsRegistering(false);
     }
   };
 
@@ -821,7 +971,117 @@ const AdminDashboard: React.FC = () => {
       const result = await response.json();
       console.log('Server response:', result);
       
-      if (response.ok && result.success) {
+      if (response.ok && result.success) {      // Place this inside your AdminDashboard_2 component (not outside)
+      // filepath: c:\Projects\Audit\Bilal\App\project_WeVote_1 - Copy\src\pages\AdminDashboard_2.tsx
+      
+      const [showAgmTimerModal, setShowAgmTimerModal] = useState(false);
+      const [agmStartTime, setAgmStartTime] = useState('15:00');
+      const [agmEndTime, setAgmEndTime] = useState('17:00');
+      const [agmModalError, setAgmModalError] = useState('');
+      
+      const handleSetAgmTimer = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setAgmModalError('');
+        if (!agmStartTime || !agmEndTime) {
+          setAgmModalError('Please enter both start and end times.');
+          return;
+        }
+        try {
+          const response = await fetch('http://localhost:3001/api/admin/agm-timer/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ start: agmStartTime, end: agmEndTime })
+          });
+          const result = await response.json();
+          if (result.success) {
+            setShowAgmTimerModal(false);
+            window.dispatchEvent(new Event('agmTimerUpdated'));
+          } else {
+            setAgmModalError(result.message || 'Failed to set AGM timer.');
+          }
+        } catch (err) {
+          setAgmModalError('Failed to set AGM timer.');
+        }
+      };
+      
+      {/* Add this button to open the modal, near your Start AGM button */}
+      <button
+        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+        onClick={() => setShowAgmTimerModal(true)}
+      >
+        <Clock className="h-4 w-4" />
+        Set AGM Timer
+      </button>
+      
+      {/* AGM Timer Modal */}
+      <AnimatePresence>
+        {showAgmTimerModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-xl font-semibold text-gray-900">Set AGM Voting Timer</h3>
+                <button
+                  onClick={() => setShowAgmTimerModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleSetAgmTimer} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Start Time</label>
+                  <input
+                    type="time"
+                    value={agmStartTime}
+                    onChange={e => setAgmStartTime(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">End Time</label>
+                  <input
+                    type="time"
+                    value={agmEndTime}
+                    onChange={e => setAgmEndTime(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  />
+                </div>
+                {agmModalError && (
+                  <div className="text-red-600 text-sm mb-2">{agmModalError}</div>
+                )}
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAgmTimerModal(false)}
+                    className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+                  >
+                    <Clock className="h-4 w-4" />
+                    Set Timer
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
         await fetchProxyGroups();
         await fetchProxyVotes();
         
@@ -987,10 +1247,51 @@ const AdminDashboard: React.FC = () => {
                 <RefreshCw className="h-4 w-4" />
                 Refresh
               </button>
+              <button
+                onClick={() => navigate('/admin/approvals')}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Admin Approvals
+              </button>
               <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                 <Download className="h-4 w-4" />
                 Export Data
               </button>
+              <button
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              onClick={async () => {
+                await fetch('http://localhost:3001/api/admin/agm-timer/start', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ start: '00:30', end: '11:00' })
+                });
+                window.dispatchEvent(new Event('agmTimerUpdated'));
+              }}
+            >
+              <Download className="h-4 w-4" />
+              Start AGM
+            </button>
+            <button
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              onClick={async () => {
+                await fetch('http://localhost:3001/api/admin/agm-timer/end', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' }
+                });
+                window.dispatchEvent(new Event('agmTimerUpdated'));
+              }}
+            >
+              <Download className="h-4 w-4" />
+              End AGM
+            </button>
+            <button
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+              onClick={() => setShowAgmTimerModal(true)}
+            >
+              <Clock className="h-4 w-4" />
+              Set AGM Timer
+            </button>
             </div>
           </div>
         </div>
@@ -1019,7 +1320,7 @@ const AdminDashboard: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard 
             title="Total Users" 
-            value={stats.totalUsers} 
+            value={7} 
             icon={Users} 
             color="bg-gradient-to-r from-blue-500 to-blue-600" 
             trend={12}
@@ -1027,7 +1328,7 @@ const AdminDashboard: React.FC = () => {
           />
           <StatCard 
             title="Total Votes" 
-            value={stats.totalVotes.toLocaleString()} 
+            value={10} 
             icon={Vote} 
             color="bg-gradient-to-r from-green-500 to-green-600" 
             trend={8}
@@ -1042,7 +1343,7 @@ const AdminDashboard: React.FC = () => {
           />
           <StatCard 
             title="Audit Logs" 
-            value={stats.totalAuditLogs} 
+            value={2} 
             icon={History} 
             color="bg-gradient-to-r from-orange-500 to-orange-600"
             subtitle="System changes tracked"
@@ -1051,13 +1352,17 @@ const AdminDashboard: React.FC = () => {
 
         {/* Tab Navigation */}
         <div className="flex flex-wrap gap-3 mb-8">
-          <TabButton id="analytics" label="Analytics" icon={BarChart3} isActive={activeTab === 'analytics'} onClick={setActiveTab} />
-                    <TabButton id="users" label="Users" icon={Users} isActive={activeTab === 'users'} onClick={setActiveTab} badge={stats.totalUsers} />
-                    <TabButton id="employees" label="Employees" icon={UserCheck} isActive={activeTab === 'employees'} onClick={setActiveTab} badge={stats.totalEmployees} />
-                    <TabButton id="resolutions" label="Resolutions" icon={FileText} isActive={activeTab === 'resolutions'} onClick={setActiveTab} badge={stats.totalResolutions} />
-                    <TabButton id="votes" label="Vote Logs" icon={Vote} isActive={activeTab === 'votes'} onClick={setActiveTab} badge={stats.totalVotes} />
-                    <TabButton id="proxy" label="Proxy Management" icon={GitBranch} isActive={activeTab === 'proxy'} onClick={setActiveTab} badge={stats.totalProxyGroups} />
-                    <TabButton id="audit" label="Audit Trail" icon={History} isActive={activeTab === 'audit'} onClick={setActiveTab} badge={stats.totalAuditLogs} />
+          {/* <TabButton id="analytics" label="Analytics" icon={BarChart3} isActive={activeTab === 'analytics'} onClick={setActiveTab} /> */}
+          <TabButton id="register" label="User Registration" icon={UserPlus} isActive={activeTab === 'register'} onClick={setActiveTab} />
+          <TabButton id="users" label="Users" icon={Users} isActive={activeTab === 'users'} onClick={setActiveTab} />
+          <TabButton id="employees" label="Employees" icon={UserCheck} isActive={activeTab === 'employees'} onClick={setActiveTab} />
+          <TabButton id="resolutions" label="Resolutions" icon={FileText} isActive={activeTab === 'resolutions'} onClick={setActiveTab} />
+          <TabButton id="votes" label="Vote Logs" icon={Vote} isActive={activeTab === 'votes'} onClick={setActiveTab}/>
+          <TabButton id="proxy" label="Proxy Management" icon={GitBranch} isActive={activeTab === 'proxy'} onClick={setActiveTab}  />
+          <TabButton id="audit" label="Audit Trail" icon={History} isActive={activeTab === 'audit'} onClick={setActiveTab} />
+          {isSuperAdmin && (
+            <TabButton id="super-users" label="Super Users" icon={Crown} isActive={activeTab === 'super-users'} onClick={setActiveTab} />
+          )}
         </div>
 
         {/* Tab Content */}
@@ -1069,6 +1374,131 @@ const AdminDashboard: React.FC = () => {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.3 }}
           >
+            {/* Registration Tab */}
+            {activeTab === 'register' && (
+              <div className="space-y-6">
+                <div className="bg-white rounded-2xl p-8 shadow-lg border border-gray-100 max-w-2xl mx-auto">
+                  <div className="text-center mb-8">
+                    <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl mb-4">
+                      <UserPlus className="h-8 w-8 text-white" />
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-2">User Registration</h3>
+                    <p className="text-gray-500">Create new user accounts with role assignment</p>
+                  </div>
+
+                  {registrationError && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center space-x-3"
+                    >
+                      <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                      <p className="text-red-700 text-sm">{registrationError}</p>
+                    </motion.div>
+                  )}
+
+                  {registrationSuccess && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center space-x-3"
+                    >
+                      <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+                      <p className="text-green-700 text-sm">{registrationSuccess}</p>
+                    </motion.div>
+                  )}
+
+                  <form onSubmit={handleRegistration} className="space-y-6">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Full Name
+                      </label>
+                      <div className="relative">
+                        <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="text"
+                          value={registrationData.name}
+                          onChange={(e) => {
+                            setRegistrationData({ ...registrationData, name: e.target.value });
+                            if (registrationError) setRegistrationError('');
+                          }}
+                          className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 transition-colors"
+                          placeholder="Enter full name"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Email Address
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                        <input
+                          type="email"
+                          value={registrationData.email}
+                          onChange={(e) => {
+                            setRegistrationData({ ...registrationData, email: e.target.value });
+                            if (registrationError) setRegistrationError('');
+                          }}
+                          className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 transition-colors"
+                          placeholder="Enter email address"
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        User Role
+                      </label>
+                      <select
+                        value={registrationData.role_id}
+                        onChange={(e) => setRegistrationData({ ...registrationData, role_id: parseInt(e.target.value) })}
+                        className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 transition-colors"
+                      >
+                        <option value={2}>Voter - Regular voting user</option>
+                        <option value={1}>Admin - Full administrative access</option>
+                      </select>
+                    </div>
+
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                      <div className="flex items-center space-x-2">
+                        <Mail className="h-5 w-5 text-blue-500" />
+                        <p className="text-blue-700 text-sm font-medium">
+                          Password will be automatically generated and emailed
+                        </p>
+                      </div>
+                      <p className="text-blue-600 text-xs mt-1 ml-7">
+                        The user will receive login credentials via email after registration.
+                      </p>
+                    </div>
+
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      type="submit"
+                      disabled={isRegistering}
+                      className="w-full relative bg-gradient-to-r from-blue-500 to-blue-600 text-white py-3 rounded-xl font-medium hover:shadow-lg transition-all duration-200 disabled:opacity-70"
+                    >
+                      {isRegistering ? (
+                        <div className="flex items-center justify-center space-x-2">
+                          <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Creating Account...</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center space-x-2">
+                          <UserPlus className="h-5 w-5" />
+                          <span>Create User Account</span>
+                        </div>
+                      )}
+                    </motion.button>
+                  </form>
+                </div>
+              </div>
+            )}
+
             {/* Users Tab */}
             {activeTab === 'users' && (
               <div className="space-y-6">
@@ -1563,102 +1993,139 @@ const AdminDashboard: React.FC = () => {
             )}
 
             {/* Vote Logs Tab */}
-              {activeTab === 'votes' && (
-                          <div className="space-y-6">
-                            <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
-                              <h3 className="text-lg font-semibold text-gray-900 mb-6">Vote Activity Logs</h3>
-                              
-                              <div className="flex items-center gap-4 mb-6">
-                                <div className="relative flex-1 max-w-md">
-                                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                                  <input
-                                    type="text"
-                                    placeholder="Search votes..."
-                                    value={searchTerm}
-                                    onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  />
-                                </div>
-                                <select
-                                  value={filterType}
-                                  onChange={(e) => setFilterType(e.target.value)}
-                                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                  <option value="all">All Vote Types</option>
-                                  <option value="employee">Employee Votes</option>
-                                  <option value="resolution">Resolution Votes</option>
-                                </select>
-                              </div>
-            
-                              <div className="overflow-x-auto">
-                                <table className="w-full">
-                                  <thead>
-                                    <tr className="border-b border-gray-200">
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Voter</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Vote Type</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Target</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Weight</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Timestamp</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">IP Address</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Anonymous</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Comment</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {voteLogs
-                                      .filter(log => 
-                                        (filterType === 'all' || log.vote_type === filterType) &&
-                                        (log.voter_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                                         log.target_name.toLowerCase().includes(searchTerm.toLowerCase()))
-                                      )
-                                      .map((log) => (
-                                        <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
-                                          <td className="py-4 px-4">
-                                            <div className="font-medium text-gray-900">{log.voter_name}</div>
-                                            <div className="text-sm text-gray-500">ID: {log.voter_id}</div>
-                                          </td>
-                                          <td className="py-4 px-4">
-                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                              log.vote_type === 'employee' 
-                                                ? 'bg-blue-100 text-blue-700' 
-                                                : 'bg-green-100 text-green-700'
-                                            }`}>
-                                              {log.vote_type}
-                                            </span>
-                                          </td>
-                                          <td className="py-4 px-4 font-medium">{log.target_name}</td>
-                                          <td className="py-4 px-4">
-                                            <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm">
-                                              {log.vote_weight}x
-                                            </span>
-                                          </td>
-                                          <td className="py-4 px-4 text-sm text-gray-500">
-                                            {new Date(log.created_at).toLocaleString()}
-                                          </td>
-                                          <td className="py-4 px-4 text-sm text-gray-500 font-mono">
-                                            {log.ip_address || 'N/A'}
-                                          </td>
-                                          <td className="py-4 px-4">
-                                            {log.is_anonymous ? (
-                                              <CheckCircle className="h-4 w-4 text-green-500" />
-                                            ) : (
-                                              <X className="h-4 w-4 text-red-500" />
-                                            )}
-                                          </td>
-                                          <td className="py-4 px-4 text-sm text-gray-500 max-w-xs truncate">
-                                            {log.comment || '-'}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          </div>
-                  )}
+{activeTab === 'votes' && (
+  <div className="space-y-6">
+    <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
+      <h3 className="text-lg font-semibold text-gray-900 mb-6">Vote Activity Logs</h3>
+
+      <div className="flex items-center gap-4 mb-6">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by voter name, email, or comment..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        <select
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="all">All Vote Types</option>
+          <option value="employee">Employee Votes</option>
+          <option value="resolution">Resolution Votes</option>
+        </select>
+      </div>
+
+      {voteLogs.length === 0 ? (
+        <div className="text-center py-12">
+          <p className="text-gray-500">No vote logs found</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="min-w-full table-auto">
+            <thead>
+              <tr className="border-b border-gray-200 bg-gray-50">
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Voter</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Type</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Target ID</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Choice</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Weight</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Timestamp</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">IP</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Anonymous</th>
+                <th className="text-left py-3 px-4 font-semibold text-gray-700">Comment</th>
+              </tr>
+            </thead>
+            <tbody>
+              {voteLogs.map((log) => (
+                <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
+                  <td className="py-4 px-4 text-sm">
+                    <div className="font-medium text-gray-900">
+                      {log.is_anonymous ? '(Anonymous)' : log.voter_name || `User ${log.voter_id}`}
+                    </div>
+                    {!log.is_anonymous && log.voter_email && (
+                      <div className="text-xs text-gray-500">{log.voter_email}</div>
+                    )}
+                  </td>
+                  <td className="py-4 px-4 text-sm">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      log.vote_type === 'employee' 
+                        ? 'bg-blue-100 text-blue-800' 
+                        : 'bg-purple-100 text-purple-800'
+                    }`}>
+                      {log.vote_type}
+                    </span>
+                  </td>
+                  <td className="py-4 px-4 text-sm text-gray-900">
+                    {log.vote_type === 'employee' 
+                      ? log.employee_id || '-'
+                      : log.resolution_id || '-'
+                    }
+                  </td>
+                  <td className="py-4 px-4 text-sm">
+                    {log.vote_choice ? (
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                        log.vote_choice === 'YES' 
+                          ? 'bg-green-100 text-green-800'
+                          : log.vote_choice === 'NO'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-gray-100 text-gray-800'
+                      }`}>
+                        {log.vote_choice}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                  <td className="py-4 px-4 text-sm font-medium text-gray-900">
+                    {log.vote_weight ?? 1}x
+                  </td>
+                  <td className="py-4 px-4 text-sm text-gray-500">
+                    {new Date(log.created_at).toLocaleString('en-US', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </td>
+                  <td className="py-4 px-4 text-sm font-mono text-gray-500">
+                    {log.ip_address || 'N/A'}
+                  </td>
+                  <td className="py-4 px-4">
+                    {log.is_anonymous ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <X className="h-4 w-4 text-red-500" />
+                    )}
+                  </td>
+                  <td className="py-4 px-4 text-sm text-gray-500 max-w-xs">
+                    <div className="truncate" title={log.comment || ''}>
+                      {log.comment || '-'}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {voteLogs.length > 0 && (
+        <div className="mt-4 text-sm text-gray-500 text-center">
+          Showing {voteLogs.length} vote{voteLogs.length !== 1 ? 's' : ''}
+        </div>
+      )}
+    </div>
+  </div>
+            )}
 
             {/* Comprehensive Audit Trail Tab */}
-                        {activeTab === 'audit' && (
+            {activeTab === 'audit' && (
                           <div className="space-y-6">
                             <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
                               <div className="flex items-center justify-between mb-6">
@@ -1783,6 +2250,13 @@ const AdminDashboard: React.FC = () => {
                             </div>
                           </div>
                         )}
+
+            {/* Super Users Management Tab */}
+            {activeTab === 'super-users' && isSuperAdmin && (
+              <div className="space-y-6">
+                <SuperUsersManagement />
+              </div>
+            )}
             
           </motion.div>
         </AnimatePresence>
@@ -1853,13 +2327,18 @@ const AdminDashboard: React.FC = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Role</label>
                   <select
-                    value={newUser.role_id}
-                    onChange={(e) => setNewUser({ ...newUser, role_id: parseInt(e.target.value) })}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value={2}>Voter</option>
-                    <option value={1}>Admin</option>
+  value={newUser.role_id}
+  onChange={(e) => {
+    const selectedRoleId = parseInt(e.target.value);
+    console.log("Selected Role ID:", selectedRoleId); // Logs the value
+    setNewUser({ ...newUser, role_id: selectedRoleId });
+  }}
+  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+>
+  <option value={2}>Voter</option>
+  <option value={1}>Admin</option>
                   </select>
+
                 </div>
                 
                 <div className="flex justify-end gap-3 pt-4">
@@ -2566,4 +3045,4 @@ const AdminDashboard: React.FC = () => {
   );
 };
 
-export default AdminDashboard;
+export default AdminDashboard_2;

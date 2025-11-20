@@ -8,6 +8,13 @@ import authRoutes from './routes/auth.js';
 import employeesRoutes from './routes/employees.js';
 import resolutionsRoutes from './routes/resolutions.js';
 import adminRoutes from './routes/admin.js';
+import superAdminRoutes from './routes/superadmin.js';
+import whatsappRouter from './models/whatsappRouter.js';
+import proxyRoutes from './routes/proxy.js';
+import regRoutes from './routes/reg.js';
+import approvalRoutes from './routes/approval.js';
+import votingStatusRoutes from './routes/voting-status.js';
+// import proxyFormsRoutes from './routes/proxyForms.js';
 import './config/database.js'; // Ensure database connection is established
 import './middleware/auth.js'; // Ensure auth middleware is loaded
 dotenv.config();
@@ -52,7 +59,16 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/employees', employeesRoutes);
 app.use('/api/resolutions', resolutionsRoutes);
-app.use('/api/admin', adminRoutes)
+app.use('/api/admin', adminRoutes);
+app.use('/api/superadmin', superAdminRoutes);
+app.use('/api/voting-status', votingStatusRoutes);
+app.use('/whatsapp', whatsappRouter);
+app.use('/api/employees/webhook', employeesRoutes); // WhatsApp webhook
+app.use('/api/proxy', proxyRoutes);
+app.use('/api/reg', regRoutes);
+app.use('/api/approval', approvalRoutes);
+// app.use('/api/proxy-forms', proxyFormsRoutes); // Proxy forms
+
 
 // Health check
 app.get('/api/health', (req, res) => {

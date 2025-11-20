@@ -44,6 +44,16 @@ class ApiService {
     return await this.handleResponse(response);
   }
 
+  async registerM(userData: { email: string; password: string; name: string; avatar_url?: string }) {
+    const response = await fetch(`${this.baseURL}/auth/registerM`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(userData),
+    });
+
+    return await this.handleResponse(response);
+  }
+
   // Microsoft OAuth login
   async loginWithMicrosoft(accessToken: string, user: any) {
     const response = await fetch(`${this.baseURL}/auth/microsoft`, {
@@ -107,6 +117,48 @@ class ApiService {
     return await this.handleResponse(response);
   }
 
+  async registerEmployee(employeeData: any) {
+  try {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_BASE_URL}/employees/register`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(employeeData),
+    });
+
+    const result = await response.json();
+    return result;
+  } catch (error) {
+    console.error('Error registering employee:', error);
+    throw error;
+  }
+}
+
+// Add this to your apiService
+async checkEmployeeStatus(userId: string) {
+  try {
+    const headers = this.getHeaders();
+    console.log('Request headers:', headers); 
+    const response = await fetch(`${API_BASE_URL}/employees/status/${userId}`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('Error checking employee status:', error);
+    throw error;
+  }
+}
+
+
   // Resolution endpoints
   async getresolutions() {
     const response = await fetch(`${this.baseURL}/resolutions`, {
@@ -126,11 +178,21 @@ class ApiService {
     return await this.handleResponse(response);
   }
 
-  async voteForResolution(id: string, comment?: string) {
+  // async voteForResolution(id: string, comment?: string, vote_choice?: string) {
+  //   const response = await fetch(`${this.baseURL}/resolutions/${id}/vote`, {
+  //     method: 'POST',
+  //     headers: this.getHeaders(),
+  //     body: JSON.stringify({ vote_choice, comment }),
+  //   });
+
+  //   return await this.handleResponse(response);
+  // }
+
+  async voteForResolution(id: string, vote_choice?: string) {
     const response = await fetch(`${this.baseURL}/resolutions/${id}/vote`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ comment }),
+      body: JSON.stringify({ vote_choice}),
     });
 
     return await this.handleResponse(response);
@@ -170,12 +232,37 @@ class ApiService {
     return await this.handleResponse(response);
   }
 
+  async getVoteStatusByUserId(userId: string) {
+  const response = await fetch(`${this.baseURL}/admin/votes/user/${userId}`, {
+    method: 'GET',
+    headers: this.getHeaders(),
+  });
+  return await this.handleResponse(response);
+}
+
+async getVoteStatusByResolutionId(resolutionId: string) {
+    const response = await fetch(`${API_BASE_URL}/resolutions/${resolutionId}/votes`, {
+    method: 'GET',
+    headers: this.getHeaders(),
+  });
+  return await this.handleResponse(response);
+}
+  
   // Health check
   async healthCheck() {
     const response = await fetch(`${this.baseURL}/health`, {
       method: 'GET',
     });
 
+    return await this.handleResponse(response);
+  }
+
+  async updatePassword(userId: string, password: string) {
+    const response = await fetch(`${API_BASE_URL}/auth/update-password`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ userId, password }),
+    });
     return await this.handleResponse(response);
   }
 }
