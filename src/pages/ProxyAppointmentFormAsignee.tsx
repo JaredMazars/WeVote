@@ -105,9 +105,10 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
 
   // New state: sensitive toggle, employees list, and assignee (current logged-in user)
   const [availableEmployees, setAvailableEmployees] = React.useState<Array<{ id: string; name: string }>>([]);
-  const [assignee, setAssignee] = React.useState<{ id: string; name: string; email: string; memberNumber: string; appointmentType: 'discretional' | 'instructional'; allowedCandidates: string[] }>(
-    { id: '', name: '', email: '', memberNumber: '', appointmentType: 'discretional', allowedCandidates: [] }
+  const [assignee, setAssignee] = React.useState<{ id: string; name: string; email: string; memberNumber: string; appointmentType: 'discretional' | 'instructional'; allowedCandidates: string[]; votesAllocated: number }>(
+    { id: '', name: '', email: '', memberNumber: '', appointmentType: 'discretional', allowedCandidates: [], votesAllocated: 0 }
   );
+  const [principalMember, setPrincipalMember] = React.useState<{ name: string; memberNumber: string; availableVotes: number; totalVotes: number } | null>(null);
 
   //   const { user, logout } = useAuth();
   
@@ -172,6 +173,50 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
     fetchCurrentUser();
   }, []);
 
+  // Fetch principal member details when membership number is entered
+  React.useEffect(() => {
+    const fetchPrincipalMemberDetails = async () => {
+      if (!formData.membershipNumber || formData.membershipNumber.length < 3) {
+        setPrincipalMember(null);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/admin/users?search=${formData.membershipNumber}`);
+        const json = await res.json();
+        
+        if (json.success && json.data && json.data.length > 0) {
+          // Find user by exact membership number match
+          const user = json.data.find((u: any) => 
+            u.member_number === formData.membershipNumber || 
+            u.membership_number === formData.membershipNumber
+          );
+          
+          if (user) {
+            // Get user's vote weight and calculate available votes
+            const voteWeight = user.vote_weight || user.max_votes_allowed || 1;
+            
+            setPrincipalMember({
+              name: user.name,
+              memberNumber: user.member_number || user.membership_number || formData.membershipNumber,
+              availableVotes: voteWeight,
+              totalVotes: voteWeight
+            });
+
+            // Auto-populate name fields if empty
+            if (!formData.fullNames && user.name) {
+              handleInputChange('fullNames', user.name);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch principal member details', err);
+      }
+    };
+
+    fetchPrincipalMemberDetails();
+  }, [formData.membershipNumber]);
+
   const toggleAssigneeCandidate = (employeeId: string) => {
     setAssignee(prev => {
       const allowed = new Set(prev.allowedCandidates);
@@ -182,6 +227,24 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
 
   const setAssigneeAppointmentType = (type: 'discretional' | 'instructional') => {
     setAssignee(prev => ({ ...prev, appointmentType: type }));
+  };
+
+  const handleVoteAllocation = (votes: number) => {
+    if (!principalMember) return;
+    
+    // Ensure votes don't exceed available votes
+    const allocatedVotes = Math.min(Math.max(0, votes), principalMember.availableVotes);
+    
+    setAssignee(prev => ({ ...prev, votesAllocated: allocatedVotes }));
+    
+    // Update available votes for principal member
+    setPrincipalMember(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        availableVotes: prev.totalVotes - allocatedVotes
+      };
+    });
   };
 
   const validateForm = (): boolean => {
@@ -200,6 +263,16 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
     // Validate assignee is populated
     if (!assignee.name) newErrors.assigneeName = 'Assignee details not loaded. Please refresh the page.';
     if (!assignee.memberNumber) newErrors.assigneeMemberNumber = 'Assignee membership number missing.';
+    
+    // Validate vote allocation
+    if (principalMember && principalMember.totalVotes > 0) {
+      if (assignee.votesAllocated <= 0) {
+        newErrors.votesAllocated = 'Please allocate at least 1 vote to the proxy member.';
+      }
+      if (assignee.votesAllocated > principalMember.totalVotes) {
+        newErrors.votesAllocated = `Cannot allocate more than ${principalMember.totalVotes} votes.`;
+      }
+    }
     
     // Validate allowed candidates for instructional assignee
     if (assignee.appointmentType === 'instructional' && assignee.allowedCandidates.length === 0) {
@@ -286,7 +359,7 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
           id_number: assignee.id || '',
           appointment_type: assignee.appointmentType.toUpperCase(),
           allowedCandidates: assignee.allowedCandidates,
-          votes_allocated: 0
+          votes_allocated: assignee.votesAllocated || 0
         },
         // Then add any additional proxy members from the form
         ...formData.proxyGroupMembers.map(member => ({
@@ -309,7 +382,15 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
         memberNumber: assignee.memberNumber,
         membershipNumber: assignee.memberNumber,
         appointmentType: assignee.appointmentType.toUpperCase(),
-        allowedCandidates: assignee.allowedCandidates
+        allowedCandidates: assignee.allowedCandidates,
+        votesAllocated: assignee.votesAllocated || 0
+      },
+
+      // Principal member vote details
+      principal_member_votes: {
+        total_votes: principalMember?.totalVotes || 1,
+        allocated_votes: assignee.votesAllocated || 0,
+        remaining_votes: principalMember?.availableVotes || 0
       }
     };
 
@@ -533,6 +614,12 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
             </div>
           )}
 
+          {errors.votesAllocated && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-red-700 text-sm">{errors.votesAllocated}</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
               <label className="block text-sm text-gray-700">Name</label>
@@ -547,6 +634,74 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
               <div className="mt-1 text-gray-900">{assignee.memberNumber || '—'}</div>
             </div>
           </div>
+
+          {/* Vote Allocation Section */}
+          {principalMember && principalMember.totalVotes > 0 && (
+            <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center space-x-2">
+                  <Vote className="h-5 w-5 text-blue-600" />
+                  <label className="block text-sm font-semibold text-gray-800">Allocate Votes to Proxy Member</label>
+                </div>
+                <div className="text-sm text-gray-600">
+                  Available: <strong className="text-blue-600">{principalMember.availableVotes}</strong> / {principalMember.totalVotes}
+                </div>
+              </div>
+              
+              <div className="space-y-3">
+                <div className="flex items-center space-x-4">
+                  <input
+                    type="number"
+                    min="0"
+                    max={principalMember.totalVotes}
+                    value={assignee.votesAllocated}
+                    onChange={(e) => handleVoteAllocation(parseInt(e.target.value) || 0)}
+                    className="w-32 px-3 py-2 border border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-center font-semibold"
+                    placeholder="0"
+                  />
+                  <span className="text-sm text-gray-700">votes allocated to <strong>{assignee.name || 'this proxy member'}</strong></span>
+                </div>
+
+                {/* Quick allocation buttons */}
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs text-gray-600">Quick select:</span>
+                  {[1, 2, 3, 5, principalMember.totalVotes].filter((v, i, arr) => v <= principalMember.totalVotes && arr.indexOf(v) === i).map(votes => (
+                    <button
+                      key={votes}
+                      type="button"
+                      onClick={() => handleVoteAllocation(votes)}
+                      className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                        assignee.votesAllocated === votes
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white text-blue-600 border border-blue-300 hover:bg-blue-50'
+                      }`}
+                    >
+                      {votes === principalMember.totalVotes ? 'All' : votes}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => handleVoteAllocation(0)}
+                    className="px-3 py-1 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <p className="text-xs text-gray-600 italic">
+                  The proxy member will be able to cast up to <strong>{assignee.votesAllocated}</strong> vote{assignee.votesAllocated !== 1 ? 's' : ''} on your behalf.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!principalMember && formData.membershipNumber && (
+            <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                ⚠️ Please enter a valid membership number in Section 1 to enable vote allocation.
+              </p>
+            </div>
+          )}
 
           <div className="mb-4 p-4 bg-blue-50 rounded border border-blue-100">
             <label className="block text-sm font-medium text-gray-800 mb-2">Proxy Appointment Type</label>
@@ -683,6 +838,21 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
                   }`}
                 />
                 {errors.membershipNumber && <p className="text-red-500 text-sm mt-1">{errors.membershipNumber}</p>}
+                
+                {/* Show principal member details if found */}
+                {principalMember && (
+                  <div className="mt-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                      <p className="text-sm font-medium text-green-800">Member Found: {principalMember.name}</p>
+                    </div>
+                    <div className="text-xs text-green-700 space-y-1">
+                      <p>Total Votes Available: <strong>{principalMember.totalVotes}</strong></p>
+                      <p>Remaining Votes: <strong>{principalMember.availableVotes}</strong></p>
+                      <p>Allocated to Proxy: <strong>{assignee.votesAllocated}</strong></p>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div className="md:col-span-2">
