@@ -94,7 +94,8 @@ router.post('/login', authLimiter, [
       email: user.email,
       name: user.name,
       surname: user.surname,
-      membership_number: user.membership_number,
+      membership_number: user.member_number,
+      member_number: user.member_number,
       avatar: user.avatar_url,
       role: user.role_name?.toLowerCase() || 'voter'
     };
@@ -263,6 +264,7 @@ router.post('/register', authLimiter, [
       email: user.email,
       name: user.name,
       avatar: user.avatar_url,
+      member_number: user.member_number,
       role: user.role_name?.toLowerCase() || 'voter'
     };
 
@@ -338,6 +340,7 @@ router.get('/verify', async (req, res) => {
       email: user.email,
       name: user.name,
       avatar: user.avatar_url,
+      member_number: user.member_number,
       role: user.role_name?.toLowerCase() || 'voter'
     };
 
@@ -433,7 +436,8 @@ router.post('/microsoft', async (req, res) => {
           name: existingUser.name,
           email: existingUser.email,
           role: existingUser.role_name?.toLowerCase() || 'voter',
-          avatar: existingUser.avatar_url
+          member_number: existingUser.member_number,
+          avatar: existingUser.avatar_url,
         }
       });
       

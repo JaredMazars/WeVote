@@ -64,7 +64,7 @@ static async create(userData) {
       SELECT u.id, u.email, u.password_hash, u.name, u.surname, u.avatar_url, 
              u.role_id, u.is_active, u.email_verified, u.last_login,
              u.created_at, u.updated_at, u.microsoft_id, u.provider,
-             u.phone_number, u.created_by, u.updated_by,
+             u.phone_number, u.created_by, u.updated_by, u.member_number,
              r.name as role_name, r.description as role_description, r.permissions
       FROM users u
       LEFT JOIN roles r ON u.role_id = r.id
@@ -79,7 +79,7 @@ static async create(userData) {
   static async findById(id) {
     const sql = `
       SELECT u.id, u.email, u.name, u.avatar_url, u.is_active,
-             u.email_verified, u.last_login, u.created_at,
+             u.email_verified, u.last_login, u.created_at, u.member_number,
              r.name as role_name, r.description as role_description
       FROM users u
       LEFT JOIN roles r ON u.role_id = r.id
