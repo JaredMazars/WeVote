@@ -190,6 +190,9 @@ const EmployeeDetails: React.FC = () => {
       setEmployee(prev => prev ? { ...prev, votes: Math.max(0, prev.votes - result.removedCount) } : null);
       showSuccess(`Removed ${result.removedCount} vote(s)!`);
       checkProxyVoteStatus();
+      
+      // Trigger VotingStatusBar refresh
+      window.dispatchEvent(new Event('votingStatusUpdated'));
     } else {
       showWarning(result.message || 'Failed to remove votes');
     }
@@ -292,11 +295,23 @@ const EmployeeDetails: React.FC = () => {
       }
     };
 
+    // Listen for AGM timer updates
+    const handleAgmTimerUpdate = () => {
+      console.log('🔄 AGM Timer updated in EmployeeDetails');
+      // Timer state change detected - component will re-render when vote is attempted
+    };
+
+    window.addEventListener('agmTimerUpdated', handleAgmTimerUpdate);
+
     if (id) {
       fetchEmployee();
       fetchProxyGroups();
       fetchVoteStatus();
     }
+
+    return () => {
+      window.removeEventListener('agmTimerUpdated', handleAgmTimerUpdate);
+    };
   }, [id]);
 
   useEffect(() => {
@@ -305,109 +320,181 @@ const EmployeeDetails: React.FC = () => {
     }
   }, [allProxyMembers.length]);
 
-  const isVotingOpenNow = (timer: any): boolean => {
-    if (!timer?.active || !timer.start || !timer.end) {
-      return false;
+  const checkLocalAgmTimer = () => {
+    const agmStart = localStorage.getItem('agmTimerStart');
+    const agmEnd = localStorage.getItem('agmTimerEnd');
+    const agmEndTime = localStorage.getItem('agmTimerEndTime');
+    
+    if (agmEnd) {
+      return { active: false, status: 'ended' };
     }
-
+    
+    if (!agmStart || !agmEndTime) {
+      return { active: false, status: 'idle' };
+    }
+    
+    const startDateTime = new Date(agmStart);
     const now = new Date();
-    const [startH, startM] = timer.start.split(':').map(Number);
-    const [endH, endM] = timer.end.split(':').map(Number);
+    
+    // Parse end time
+    const [endHour, endMinute] = agmEndTime.split(':').map(Number);
+    const endDateTime = new Date(startDateTime);
+    endDateTime.setHours(endHour, endMinute, 0, 0);
+    
+    // If end time is before start time, assume it's the next day
+    if (endDateTime <= startDateTime) {
+      endDateTime.setDate(endDateTime.getDate() + 1);
+    }
+    
+    // Check if we're within the voting window
+    const isActive = now >= startDateTime && now <= endDateTime;
+    
+    return {
+      active: isActive,
+      status: isActive ? 'running' : (now > endDateTime ? 'expired' : 'not-started'),
+      startDateTime,
+      endDateTime
+    };
+  };
 
-    const votingStart = new Date(now);
-    const votingEnd = new Date(now);
+  // Function to check user's vote limits before voting
+  const checkVoteLimits = async (userId: string): Promise<{ canVote: boolean; message?: string; votingStatus?: any }> => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:3001/api/voting-status/status/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
 
-    votingStart.setHours(startH, startM, 0, 0);
-    votingEnd.setHours(endH, endM, 0, 0);
+      if (!response.ok) {
+        return { canVote: false, message: 'Unable to verify voting limits. Please try again.' };
+      }
 
-    return now >= votingStart && now <= votingEnd;
+      const result = await response.json();
+      if (!result.success || !result.data) {
+        return { canVote: false, message: 'Unable to verify voting limits. Please try again.' };
+      }
+
+      const votingStatus = result.data;
+      
+      // Check if user has any votes remaining
+      if (votingStatus.totalVotesRemaining <= 0) {
+        const personalUsed = votingStatus.personalVotesTotal - votingStatus.personalVotesRemaining;
+        const proxyUsed = votingStatus.proxyVotesTotal - votingStatus.proxyVotesRemaining;
+        
+        return { 
+          canVote: false, 
+          message: `You have no votes remaining. You have used all ${personalUsed} personal votes` + 
+                   (proxyUsed > 0 ? ` and ${proxyUsed} proxy votes.` : '.'),
+          votingStatus 
+        };
+      }
+
+      return { canVote: true, votingStatus };
+    } catch (error) {
+      console.error('Error checking vote limits:', error);
+      return { canVote: false, message: 'Unable to verify voting limits. Please try again.' };
+    }
   };
 
   const handleVote = async () => {
-  // Check voting session status
-  let timer;
-  try {
-    const response = await fetch('http://localhost:3001/api/admin/agm-timer/status');
-    const result = await response.json();
-    timer = result.agmTimer;
-  } catch (error) {
-    console.error('Error fetching timer:', error);
-    showWarning('Unable to check voting session. Please try again later.');
-    return;
-  }
-
-  if (!timer?.active) {
-    showWarning('Voting session is not active. Please wait for the voting to begin.');
-    return;
-  }
-
-  if (!isVotingOpenNow(timer)) {
-    showWarning('Voting period is not active.');
-    return;
-  }
-
-  if (!employee) {
-    showWarning('No employee selected.');
-    return;
-  }
-
-  setIsVoting(true);
-  const token = localStorage.getItem('token');
-
-  if (!token) {
-    showWarning('You must be logged in to vote');
-    setIsVoting(false);
-    return;
-  }
-
-  const storedUser = localStorage.getItem('user');
-  const user = storedUser ? JSON.parse(storedUser) : null;
-
-  if (!user?.id) {
-    showWarning('Invalid authentication token');
-    setIsVoting(false);
-    return;
-  }
-
-  try {
-    // Use the override endpoint to handle both proxy removal and direct voting
-    const response = await fetch(`http://localhost:3001/api/employees/${employee.id}/vote/override`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        comment: editedComment || null
-      })
-    });
-
-    const result = await response.json();
-
-    if (result.success) {
-      setHasVoted(true);
-      
-      // If proxy vote was removed, decrease vote count by 1, then add 1 for new vote (net: 0)
-      // If no proxy vote existed, just increase by 1
-      if (result.proxyVoteRemoved) {
-        // Vote count stays same (removed proxy, added direct)
-        setEmployee(prev => prev ? { ...prev } : null);
-        showSuccess('Your proxy vote was replaced with your direct vote!');
+    // Check voting session status using localStorage
+    const timer = checkLocalAgmTimer();
+    
+    if (!timer.active) {
+      if (timer.status === 'idle') {
+        showWarning('Voting session is not active. Please wait for the voting to begin.');
+      } else if (timer.status === 'ended') {
+        showWarning('Voting session has ended.');
+      } else if (timer.status === 'expired') {
+        showWarning('Voting period has expired.');
       } else {
-        // Increase vote count
-        setEmployee(prev => prev ? { ...prev, votes: prev.votes + 1 } : null);
-        showSuccess('Your vote has been successfully submitted!');
+        showWarning('Voting is not currently available.');
       }
-    } else {
-      showWarning(result.message || 'Failed to submit vote');
+      return;
     }
-  } catch (error: any) {
-    console.error('Error voting:', error);
-    showWarning(error.message || 'Failed to submit vote');
-  } finally {
-    setIsVoting(false);
-  }
-};
+
+    if (!employee) {
+      showWarning('No employee selected.');
+      return;
+    }
+
+    setIsVoting(true);
+    const token = localStorage.getItem('token');
+
+    if (!token) {
+      showWarning('You must be logged in to vote');
+      setIsVoting(false);
+      return;
+    }
+
+    const storedUser = localStorage.getItem('user');
+    const user = storedUser ? JSON.parse(storedUser) : null;
+
+    if (!user?.id) {
+      showWarning('Invalid authentication token');
+      setIsVoting(false);
+      return;
+    }
+
+    // Check vote limits before proceeding
+    console.log('🔍 Checking vote limits for user:', user.id);
+    const voteLimitCheck = await checkVoteLimits(user.id);
+    
+    if (!voteLimitCheck.canVote) {
+      showWarning(voteLimitCheck.message || 'You cannot vote at this time.');
+      setIsVoting(false);
+      return;
+    }
+
+    console.log('✅ Vote limit check passed. User has votes remaining.');
+
+    try {
+      // Use the override endpoint to handle both proxy removal and direct voting
+      const response = await fetch(`http://localhost:3001/api/employees/${employee.id}/vote/override`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          comment: editedComment || null
+        })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setHasVoted(true);
+        
+        // If proxy vote was removed, decrease vote count by 1, then add 1 for new vote (net: 0)
+        // If no proxy vote existed, just increase by 1
+        if (result.proxyVoteRemoved) {
+          // Vote count stays same (removed proxy, added direct)
+          setEmployee(prev => prev ? { ...prev } : null);
+          showSuccess('Your proxy vote was replaced with your direct vote!');
+        } else {
+          // Increase vote count
+          setEmployee(prev => prev ? { ...prev, votes: prev.votes + 1 } : null);
+          showSuccess('Your vote has been successfully submitted!');
+        }
+
+        // Trigger VotingStatusBar refresh to update vote counts
+        window.dispatchEvent(new Event('votingStatusUpdated'));
+        
+        console.log('✅ Vote submitted successfully and status bar updated');
+      } else {
+        showWarning(result.message || 'Failed to submit vote');
+      }
+    } catch (error: any) {
+      console.error('Error voting:', error);
+      showWarning(error.message || 'Failed to submit vote');
+    } finally {
+      setIsVoting(false);
+    }
+  };
 
 
   const handleEditVote = async () => {
@@ -477,6 +564,9 @@ const EmployeeDetails: React.FC = () => {
           votes: Math.max(0, prev.votes - (result.removedCount || 1))
         } : null);
         showSuccess(`Your vote has been successfully removed!`);
+        
+        // Trigger VotingStatusBar refresh
+        window.dispatchEvent(new Event('votingStatusUpdated'));
       } else {
         showWarning(result.message || 'Failed to remove vote');
       }
@@ -539,6 +629,9 @@ const EmployeeDetails: React.FC = () => {
       
       // Refresh status
       setTimeout(() => checkProxyVoteStatus(), 500);
+      
+      // Trigger VotingStatusBar refresh
+      window.dispatchEvent(new Event('votingStatusUpdated'));
     } else {
       showWarning(result.message || 'Failed to cast proxy votes');
     }
@@ -691,7 +784,9 @@ const handleProxyVoteSubmit = () => {
                       className="flex items-start space-x-3 p-4 bg-[#F4F4F4] rounded-xl"
                     >
                       <Star className="h-5 w-5 text-[#0072CE] mt-0.5 flex-shrink-0" />
-                      <p className="text-[#464B4B] leading-relaxed">{achievement}</p>
+                      <p className="text-[#464B4B] leading-relaxed">
+                        {typeof achievement === 'string' ? achievement : (achievement.title || achievement.description)}
+                      </p>
                     </div>
                   ))
                 ) : (
@@ -712,7 +807,7 @@ const handleProxyVoteSubmit = () => {
                       key={index}
                       className="px-4 py-2 bg-gradient-to-r from-[#0072CE]/10 to-[#171C8F]/10 text-[#0072CE] rounded-xl font-medium border border-[#0072CE]/20"
                     >
-                      {skill}
+                      {typeof skill === 'string' ? skill : skill.skill_name}
                     </span>
                   ))
                 ) : (

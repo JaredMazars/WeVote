@@ -1,45 +1,115 @@
 import React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
-import apiService from '../services/api';
 import { Event } from '../utils/types';
 import VotingCard from '../components/VotingCard';
-import { Calendar, ArrowLeft, Sparkles, TrendingUp, MapPin } from 'lucide-react';
+import { Calendar, ArrowLeft, Sparkles, TrendingUp, WifiOff, RefreshCw, AlertTriangle } from 'lucide-react';
+import { apiCall, isOnline, NetworkError } from '../utils/apiHelpers';
 
 const EventVoting: React.FC = () => {
   const navigate = useNavigate();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOffline, setIsOffline] = useState(!isOnline());
+  const [isRetrying, setIsRetrying] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const fetchEvents = async () => {
-      try {
+    // Network status listeners
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const fetchEvents = async (isRetry = false) => {
+    try {
+      if (isRetry) {
+        setIsRetrying(true);
+      } else {
         setLoading(true);
-        const response = await fetch('http://localhost:3001/api/resolutions', {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-        const result = await response.json();
-        console.log("Fetched events:", result);
-        // console.log("Fetched events:", response);
-        if (response.ok) {
-          setEvents(result.data); // Assuming result.data contains the events array
-        } else {
-          setError(result.message || 'Failed to fetch events');
+      }
+      setError(null);
+
+      // Cancel any pending request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Create new abort controller
+      abortControllerRef.current = new AbortController();
+
+      console.log('🔄 Fetching resolutions...');
+
+      const result = await apiCall<{ success: boolean; data: Event[]; message?: string }>(
+        '/api/resolutions',
+        {
+          method: 'GET',
+          signal: abortControllerRef.current.signal,
+          retries: 2,
+          timeout: 30000
         }
-      } catch (err) {
-        setError('Failed to fetch events');
-        console.error('Error fetching events:', err);
-      } finally {
-        setLoading(false);
+      );
+
+      console.log('✅ Resolutions fetched successfully:', result);
+
+      if (result.success && result.data) {
+        setEvents(result.data);
+        setError(null);
+      } else {
+        throw new Error(result.message || 'Failed to fetch resolutions');
+      }
+    } catch (err: any) {
+      console.error('❌ Error fetching resolutions:', err);
+      
+      // Don't set error if request was cancelled
+      if (err.name === 'AbortError') {
+        console.log('ℹ️ Request cancelled');
+        return;
+      }
+
+      if (err instanceof NetworkError) {
+        if (err.status === 401) {
+          setError('Session expired. Please login again.');
+        } else if (err.status === 0) {
+          setError('No internet connection. Please check your network.');
+        } else {
+          setError(err.message || 'Failed to load resolutions. Please try again.');
+        }
+      } else {
+        setError('An unexpected error occurred. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+      setIsRetrying(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    fetchEvents();
+
+    // Cleanup: cancel pending request on unmount
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
-
-    fetchEvents();
   }, []);
+
+  const handleRetry = () => {
+    if (!isOffline) {
+      fetchEvents(true);
+    }
+  };
 
   // const totalVotes = events.reduce((sum, event) => sum + event.votes, 0);
   // const mostPopular = events.reduce((prev, current) => 
@@ -149,18 +219,69 @@ const EventVoting: React.FC = () => {
 
         {/* Event Cards Grid */}
         {loading ? (
-          <div className="flex justify-center items-center py-12">
+          <div className="flex flex-col justify-center items-center py-12">
             <div className="w-8 h-8 border-4 border-[#0072CE] border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-gray-600 mt-4">Loading resolutions...</p>
           </div>
         ) : error ? (
           <div className="text-center py-12">
-            <p className="text-red-500 mb-4">{error}</p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="bg-[#0072CE] text-white px-4 py-2 rounded-lg"
-            >
-              Retry
-            </button>
+            <div className="mb-6">
+              {isOffline ? (
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-orange-100 rounded-full mb-4">
+                  <WifiOff className="h-8 w-8 text-orange-600" />
+                </div>
+              ) : (
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
+                  <AlertTriangle className="h-8 w-8 text-red-600" />
+                </div>
+              )}
+            </div>
+            
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              {isOffline ? 'No Internet Connection' : 'Failed to Load Resolutions'}
+            </h3>
+            
+            <p className="text-red-600 mb-6 max-w-md mx-auto">
+              {error}
+            </p>
+            
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <button 
+                onClick={handleRetry}
+                disabled={isRetrying || isOffline}
+                className="flex items-center justify-center gap-2 bg-[#0072CE] text-white px-6 py-3 rounded-lg hover:bg-[#005FA3] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isRetrying ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Retrying...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4" />
+                    Retry
+                  </>
+                )}
+              </button>
+              
+              <button
+                onClick={() => navigate('/voting')}
+                className="flex items-center justify-center gap-2 bg-gray-100 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-200 transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Categories
+              </button>
+            </div>
+          </div>
+        ) : events.length === 0 ? (
+          <div className="text-center py-12">
+            <Calendar className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+              No Resolutions Available
+            </h3>
+            <p className="text-gray-600">
+              There are currently no resolutions to vote for.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

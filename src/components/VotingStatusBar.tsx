@@ -227,10 +227,18 @@ const VotingStatusBar: React.FC = () => {
       fetchVotingStatus();
     };
 
+    // Set up event listener for voting status updates (when votes are cast/removed)
+    const handleVotingStatusUpdate = () => {
+      console.log('Voting status updated, refreshing...');
+      fetchVotingStatus();
+    };
+
     window.addEventListener('proxyDataUpdated', handleProxyUpdate);
+    window.addEventListener('votingStatusUpdated', handleVotingStatusUpdate);
 
     return () => {
       window.removeEventListener('proxyDataUpdated', handleProxyUpdate);
+      window.removeEventListener('votingStatusUpdated', handleVotingStatusUpdate);
     };
   }, [getCurrentUserId]);
 

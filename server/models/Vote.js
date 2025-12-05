@@ -422,14 +422,33 @@ class Vote {
     }
 
     const userResult = await database.query(
-      `SELECT role_id, name FROM users WHERE id = ${voter_id}`
+      `SELECT role_id, name, ISNULL(max_votes_allowed, 1) as max_votes_allowed FROM users WHERE id = ${voter_id}`
     );
     if (userResult.length === 0) throw new Error('Voter not found');
     const role_id = userResult[0].role_id;
     const voterName = userResult[0].name;
+    const maxVotesAllowed = userResult[0].max_votes_allowed;
     const valid_vote = (role_id === 1 || role_id === 2) ? 1 : 0;
 
     console.log(`👤 Voter: ${voterName} (Role ID: ${role_id}) — Valid vote: ${valid_vote}`);
+    console.log(`📊 Vote limits: ${maxVotesAllowed} votes allowed`);
+
+    // Check vote limits - count current votes
+    const voteCountSql = `
+      SELECT COUNT(*) as vote_count 
+      FROM votes 
+      WHERE voter_id = ${voter_id} 
+        AND valid_vote = 1
+        AND (proxy_id IS NULL OR proxy_id = 0)
+    `;
+    const voteCountResult = await database.query(voteCountSql);
+    const currentVoteCount = voteCountResult[0]?.vote_count || 0;
+
+    console.log(`📊 Current votes cast: ${currentVoteCount}/${maxVotesAllowed}`);
+
+    if (currentVoteCount >= maxVotesAllowed) {
+      throw new Error(`❌ Vote limit exceeded. You have used all ${maxVotesAllowed} of your available votes. Remove a vote first or contact an admin to increase your vote limit.`);
+    }
 
     // Check for existing vote
     const checkSql =

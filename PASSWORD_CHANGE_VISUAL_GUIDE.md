@@ -1,0 +1,487 @@
+# 🔄 Password Change Flow - Visual Guide
+
+## Quick Reference: When Users Are Forced to Change Password
+
+### Scenario 1: Admin Approval Flow
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     ADMIN APPROVAL FLOW                          │
+└─────────────────────────────────────────────────────────────────┘
+
+Step 1: User Registration
+┌──────────────┐
+│ User clicks  │
+│ "Register"   │──► Fills form (name, email, ID, etc.)
+└──────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ Account Created      │
+│ is_active = 0        │
+│ (Waiting approval)   │
+└──────────────────────┘
+
+Step 2: Admin Review
+       │
+       ▼
+┌──────────────────────┐
+│ Admin Panel          │
+│ Reviews user         │
+│ Clicks "Approve"     │
+└──────────────────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│ System Actions:                    │
+│ • Generates 16-char password       │
+│ • is_active = 1                    │
+│ • is_temp_password = 1             │
+│ • needs_password_change = 1        │
+│ • Sends welcome email              │
+└────────────────────────────────────┘
+
+Step 3: Email Delivery
+       │
+       ▼
+┌──────────────────────┐
+│ 📧 Welcome Email     │
+│ Subject: Welcome!    │
+│ Contains:            │
+│ • Email: user@...    │
+│ • Password: abc123   │
+│ • "Login Now" button │
+└──────────────────────┘
+
+Step 4: First Login
+       │
+       ▼
+┌──────────────────────┐
+│ User opens login     │
+│ Enters email         │
+│ Enters temp password │
+└──────────────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ System checks:       │
+│ needs_password_      │
+│   change === 1 ? ✅  │
+└──────────────────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│ 🔐 PASSWORD UPDATE MODAL APPEARS   │
+│                                    │
+│ ┌──────────────────────────┐      │
+│ │ Update Password Required │      │
+│ │                          │      │
+│ │ New Password:            │      │
+│ │ [________________]       │      │
+│ │                          │      │
+│ │ [Update & Continue]      │      │
+│ └──────────────────────────┘      │
+│                                    │
+│ ❌ User CANNOT skip this modal     │
+└────────────────────────────────────┘
+
+Step 5: Password Update
+       │
+       ▼
+┌──────────────────────┐
+│ User enters new      │
+│ password (min 6)     │
+│ Clicks "Update"      │
+└──────────────────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│ System Actions:                    │
+│ • Hashes new password              │
+│ • is_temp_password = 0             │
+│ • needs_password_change = 0        │
+│ • Updates database                 │
+└────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ ✅ Success!          │
+│ Modal closes         │
+│ → Redirect to Home   │
+└──────────────────────┘
+
+Step 6: Future Logins
+       │
+       ▼
+┌──────────────────────┐
+│ User can login with  │
+│ NEW password         │
+│ No modal appears ✅  │
+└──────────────────────┘
+```
+
+---
+
+### Scenario 2: Forgot Password Flow
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   FORGOT PASSWORD FLOW                           │
+└─────────────────────────────────────────────────────────────────┘
+
+Step 1: User Forgets Password
+┌──────────────────────┐
+│ Login Page           │
+│ User clicks:         │
+│ "Forgot Password?"   │
+└──────────────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ Forgot Password Page │
+│ Enter email address  │
+│ Click "Send"         │
+└──────────────────────┘
+
+Step 2: System Processing
+       │
+       ▼
+┌────────────────────────────────────┐
+│ Backend Actions:                   │
+│ • Verifies email exists            │
+│ • Generates 10-char temp password  │
+│ • is_temp_password = 1             │
+│ • needs_password_change = 1        │
+│ • Sends reset email                │
+└────────────────────────────────────┘
+
+Step 3: Email Delivery
+       │
+       ▼
+┌──────────────────────┐
+│ 📧 Reset Email       │
+│ Subject: Reset 🔐    │
+│ Contains:            │
+│ • Temp password in   │
+│   RED DASHED BOX     │
+│ • Warning message    │
+│ • "Login" button     │
+└──────────────────────┘
+
+Step 4: Login with Temp Password
+       │
+       ▼
+┌──────────────────────┐
+│ User copies temp     │
+│ password from email  │
+│ Logs in              │
+└──────────────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ System detects:      │
+│ needs_password_      │
+│   change === 1 ✅    │
+└──────────────────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│ 🔐 PASSWORD UPDATE MODAL APPEARS   │
+│                                    │
+│ ⚠️ "You must change your password" │
+│                                    │
+│ New Password: [____________]       │
+│                                    │
+│ [Update Password & Continue]       │
+│                                    │
+│ ❌ Cannot be skipped               │
+└────────────────────────────────────┘
+
+Step 5: Create New Password
+       │
+       ▼
+┌──────────────────────┐
+│ User enters secure   │
+│ new password         │
+│ Clicks "Update"      │
+└──────────────────────┘
+       │
+       ▼
+┌────────────────────────────────────┐
+│ Backend Updates:                   │
+│ • Saves new password hash          │
+│ • is_temp_password = 0             │
+│ • needs_password_change = 0        │
+│ • updated_at = NOW()               │
+└────────────────────────────────────┘
+       │
+       ▼
+┌──────────────────────┐
+│ ✅ Password Updated! │
+│ Access Granted       │
+│ → Home Page          │
+└──────────────────────┘
+```
+
+---
+
+## 🔄 Database Flag States
+
+### Flag Lifecycle
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    FLAG STATE DIAGRAM                        │
+└─────────────────────────────────────────────────────────────┘
+
+INITIAL STATE (Normal User):
+┌──────────────────────────┐
+│ is_temp_password = 0     │
+│ needs_password_change = 0│  → Regular login, no modal
+└──────────────────────────┘
+
+TEMP PASSWORD ASSIGNED:
+┌──────────────────────────┐
+│ is_temp_password = 1     │
+│ needs_password_change = 1│  → Password modal REQUIRED
+└──────────────────────────┘
+       │
+       │ User updates password
+       ▼
+┌──────────────────────────┐
+│ is_temp_password = 0     │
+│ needs_password_change = 0│  → Back to normal state
+└──────────────────────────┘
+```
+
+### When Flags Are Set
+```
+EVENT                           FLAGS SET TO 1
+─────────────────────────────────────────────
+Admin approves user         →   Both flags = 1
+Forgot password request     →   Both flags = 1
+User updates password       →   Both flags = 0
+```
+
+---
+
+## 🎨 Password Update Modal UI
+
+```
+┌───────────────────────────────────────────────────┐
+│                                                   │
+│  🔐 Update Password                              │
+│                                                   │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ ⚠️ Important:                               │ │
+│  │ You're using a temporary password.          │ │
+│  │ Please create a new password to continue.   │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│  New Password                                     │
+│  ┌─────────────────────────────────────────────┐ │
+│  │ 🔒 [______________________________] 👁       │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│  Minimum 6 characters required                    │
+│                                                   │
+│  ┌─────────────────────────────────────────────┐ │
+│  │     Update Password & Continue              │ │
+│  └─────────────────────────────────────────────┘ │
+│                                                   │
+│  ❌ User CANNOT close this modal                 │
+│  ❌ User CANNOT skip this step                   │
+│  ✅ Must enter new password to proceed           │
+└───────────────────────────────────────────────────┘
+```
+
+---
+
+## 📧 Email Templates Visual
+
+### Welcome Email (Admin Approval)
+```
+┌─────────────────────────────────────────────────┐
+│  🎉 Welcome to WeVote!                         │ (Blue gradient header)
+│  Your account is ready                          │
+└─────────────────────────────────────────────────┘
+│                                                 │
+│  Hello Bilal Administrator,                     │
+│                                                 │
+│  Your WeVote account has been successfully      │
+│  created! You can now log in and start          │
+│  participating in secure voting.                │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │ 🔐 Your Login Credentials                 │ │
+│  │                                           │ │
+│  │ Email: admin.bilal@wevote.com            │ │
+│  │ Password: abc123xyz789                    │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │          Login Now →                      │ │ (Button)
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  © 2025 WeVote Platform by Forvis Mazars       │
+└─────────────────────────────────────────────────┘
+```
+
+### Password Reset Email (Forgot Password)
+```
+┌─────────────────────────────────────────────────┐
+│  🔐 Password Reset                             │ (Blue gradient header)
+│  Your temporary password is ready               │
+└─────────────────────────────────────────────────┘
+│                                                 │
+│  Hello Bilal Administrator,                     │
+│                                                 │
+│  We received a request to reset your password.  │
+│  Here's your temporary password:                │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │ 🔑 Temporary Password                     │ │
+│  │                                           │ │
+│  │  ╔═════════════════════╗                 │ │
+│  │  ║   X Y Z 1 2 3 4 5   ║                 │ │ (Red box)
+│  │  ╚═════════════════════╝                 │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │ ⚠️ Important: This is a temporary         │ │ (Yellow warning)
+│  │ password. You'll be prompted to create a  │ │
+│  │ new password after login.                 │ │
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  ┌───────────────────────────────────────────┐ │
+│  │   Login & Change Password →               │ │ (Button)
+│  └───────────────────────────────────────────┘ │
+│                                                 │
+│  © 2025 WeVote Platform by Forvis Mazars       │
+└─────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔍 Detection Logic
+
+### How the System Knows to Show Password Modal
+```javascript
+// Login.tsx - After successful authentication
+
+const user = await login(email, password);
+//  ^
+//  └─ user object contains:
+//     {
+//       id: 170,
+//       email: "admin.bilal@wevote.com",
+//       name: "Bilal Administrator",
+//       is_temp_password: 1,        // ← CHECK THIS
+//       needs_password_change: 1    // ← CHECK THIS
+//     }
+
+// Detection logic:
+const needsPasswordUpdate = 
+  user.needs_password_change === 1 || 
+  user.is_temp_password === 1;
+
+if (needsPasswordUpdate) {
+  setShowPasswordUpdate(true);  // Show modal
+  return;  // Don't proceed to home
+}
+
+// If no password change needed:
+navigate('/home');  // Proceed normally
+```
+
+---
+
+## ✅ Success Indicators
+
+### User Successfully Changed Password
+```
+┌─────────────────────────────────────┐
+│  ✅ Password updated successfully!  │  (Green notification)
+└─────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│  Redirecting to Home Page...        │
+└─────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────┐
+│  🏠 Home Page                        │
+│  Full access granted                │
+└─────────────────────────────────────┘
+
+Database Updated:
+• is_temp_password = 0 ✅
+• needs_password_change = 0 ✅
+• password_hash = [new hash] ✅
+• updated_at = [current timestamp] ✅
+```
+
+---
+
+## 🚨 Error Handling
+
+### Password Too Short
+```
+┌─────────────────────────────────────┐
+│  New Password:                       │
+│  [abc]                              │
+│  ❌ Password must be at least       │
+│     6 characters                     │
+└─────────────────────────────────────┘
+```
+
+### Empty Password
+```
+┌─────────────────────────────────────┐
+│  New Password:                       │
+│  [                ]                 │
+│  ❌ New password must be at least   │
+│     6 characters                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+## 📊 Testing Checklist Visual
+
+```
+ADMIN APPROVAL TESTING:
+□ Step 1: Register user          → ✅ Account created
+□ Step 2: Admin approves         → ✅ Flags set
+□ Step 3: Email sent             → ✅ Received
+□ Step 4: Login with temp pass   → ✅ Works
+□ Step 5: Modal appears          → ✅ Shows
+□ Step 6: Update password        → ✅ Saved
+□ Step 7: Access home            → ✅ Granted
+□ Step 8: Logout & login again   → ✅ No modal
+
+FORGOT PASSWORD TESTING:
+□ Step 1: Click "Forgot Password"→ ✅ Page loads
+□ Step 2: Enter email            → ✅ Submitted
+□ Step 3: Email sent             → ✅ Received
+□ Step 4: Login with temp pass   → ✅ Works
+□ Step 5: Modal appears          → ✅ Shows
+□ Step 6: Update password        → ✅ Saved
+□ Step 7: Access home            → ✅ Granted
+□ Step 8: Logout & login again   → ✅ No modal
+```
+
+---
+
+## 🎯 Summary
+
+Both flows work identically:
+1. **Temporary password assigned** → Flags set to 1
+2. **User logs in** → System detects flags
+3. **Modal appears** → User MUST change password
+4. **Password updated** → Flags cleared to 0
+5. **Normal access** → No more modals
+
+**Status**: ✅ WORKING PERFECTLY
+
+---
+
+**Last Updated**: November 26, 2025

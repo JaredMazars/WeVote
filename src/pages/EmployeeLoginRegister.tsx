@@ -355,6 +355,10 @@ const validateStep = (step: number): boolean => {
     localStorage.setItem('passwordChange', 'true');
 
     if (choice === 'manual') {
+      const email = formData?.email || '';
+      if (email) {
+        localStorage.setItem(`proxyChoice_${email}`, 'manual');
+      }
       return;
     }
 
@@ -362,7 +366,15 @@ const validateStep = (step: number): boolean => {
       const email = formData?.email || '';
       if (email) {
         localStorage.setItem(`needsProxy_${email}`, 'true');
-        localStorage.setItem('proxyChoice', 'digital');
+        localStorage.setItem(`proxyChoice_${email}`, 'digital');
+      }
+      return;
+    }
+
+    if (choice === 'abstain') {
+      const email = formData?.email || '';
+      if (email) {
+        localStorage.setItem(`proxyChoice_${email}`, 'abstain');
       }
       return;
     }

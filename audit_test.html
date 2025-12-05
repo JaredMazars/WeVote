@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Audit Logs API Test</title>
+</head>
+<body>
+    <h1>Audit Logs API Test</h1>
+    <button onclick="testLogin()">1. Test Login</button><br><br>
+    <button onclick="testAuditLogs()">2. Test Audit Logs (after login)</button><br><br>
+    <div id="results"></div>
+
+    <script>
+        let authToken = null;
+        
+        async function testLogin() {
+            try {
+                document.getElementById('results').innerHTML = '<p>🔐 Attempting login...</p>';
+                
+                // Try admin@company.com first (plain text password)
+                let response = await fetch('http://localhost:3001/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: 'admin@company.com',
+                        password: 'password123'
+                    })
+                });
+
+                let result = await response.json();
+                
+                // If first login fails, try the super admin account
+                if (!result.success) {
+                    document.getElementById('results').innerHTML = '<p>🔄 Trying super admin account...</p>';
+                    
+                    response = await fetch('http://localhost:3001/api/auth/login', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            email: 'jaredmoodley9@gmail.com',
+                            password: 'password123'
+                        })
+                    });
+                    result = await response.json();
+                }
+                
+                if (result.success && result.token) {
+                    authToken = result.token;
+                    document.getElementById('results').innerHTML = `
+                        <p>✅ Login successful!</p>
+                        <p>Email: ${result.user?.email || 'Unknown'}</p>
+                        <p>Token: ${result.token.substring(0, 50)}...</p>
+                        <p>User: ${result.user?.name || 'Unknown'}</p>
+                        <p>Role ID: ${result.user?.role_id || 'Unknown'}</p>
+                        <p>User ID: ${result.user?.id || 'Unknown'}</p>
+                    `;
+                } else {
+                    document.getElementById('results').innerHTML = `<p>❌ Login failed: ${result.message}</p><pre>${JSON.stringify(result, null, 2)}</pre>`;
+                }
+            } catch (error) {
+                document.getElementById('results').innerHTML = `<p>💥 Login error: ${error.message}</p>`;
+            }
+        }
+
+        async function testAuditLogs() {
+            if (!authToken) {
+                document.getElementById('results').innerHTML = '<p>⚠️ Please login first!</p>';
+                return;
+            }
+
+            try {
+                document.getElementById('results').innerHTML = '<p>📡 Fetching audit logs...</p>';
+                
+                const response = await fetch('http://localhost:3001/api/audit-logs', {
+                    headers: {
+                        'Authorization': `Bearer ${authToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (result.success && result.data) {
+                    let output = `<p>🎉 SUCCESS! Found ${result.data.length} audit logs:</p><ul>`;
+                    result.data.slice(0, 10).forEach((log, index) => {
+                        output += `<li>${index + 1}. [${log.action_category}] ${log.action_type} - ${log.description} (${new Date(log.created_at).toLocaleString()})</li>`;
+                    });
+                    output += '</ul>';
+                    document.getElementById('results').innerHTML = output;
+                } else {
+                    document.getElementById('results').innerHTML = `<p>❌ No audit data: ${result.message}</p>`;
+                }
+            } catch (error) {
+                document.getElementById('results').innerHTML = `<p>💥 Audit logs error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

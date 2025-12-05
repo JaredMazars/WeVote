@@ -2,6 +2,9 @@ import express from 'express';
 import Employee from '../models/Employee.js';
 import Proxy from '../models/Proxy.js'; 
 import database from '../config/database.js';
+import { uploadProxyFile, handleUploadError } from '../middleware/upload.js';
+import azureBlobService from '../services/azureBlobService.js';
+import fs from 'fs';
 const router = express.Router();
 
 // Check if user has any proxy groups (to determine button text)
@@ -846,22 +849,20 @@ router.patch('/proxy-group/:id/deactivate', async (req, res) => {
 // Admin endpoint: Get all proxy groups with full details
 router.get('/admin/all-groups', async (req, res) => {
   try {
-    // Get all proxy groups
+    console.log('🔍 [PROXY-API] Fetching all proxy groups...');
+    
+    // Get all proxy groups - simplified query without vote checks
     const groups = await database.query(`
       SELECT 
         pg.*,
         u.name as principal_name,
         u.email as principal_email,
-        u.member_number as principal_member_number,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM votes v 
-          INNER JOIN proxy_group_members pgm ON v.voted_by_id = pgm.member_id 
-          WHERE pgm.group_id = pg.id
-        ) THEN 1 ELSE 0 END as has_votes_cast
+        u.member_number as principal_member_number
       FROM proxy_groups pg 
       LEFT JOIN users u ON u.id = pg.principal_id
-      ORDER BY pg.created_at DESC
     `);
+    
+    console.log(`✅ [PROXY-API] Found ${groups.length} proxy groups`);
     
     // For each group, get its members
     for (let group of groups) {
@@ -870,17 +871,10 @@ router.get('/admin/all-groups', async (req, res) => {
           pgm.*,
           u.name as member_name,
           u.email as member_email,
-          u.member_number,
-          ISNULL(pgm.votes_allocated, 0) as votes_allocated,
-          CASE WHEN EXISTS (
-            SELECT 1 FROM votes v 
-            WHERE v.voted_by_id = pgm.member_id 
-            AND v.voted_for_id = ${group.principal_id}
-          ) THEN 1 ELSE 0 END as has_voted
+          u.member_number
         FROM proxy_group_members pgm
         LEFT JOIN users u ON u.id = pgm.member_id
         WHERE pgm.group_id = ${group.id}
-        ORDER BY pgm.created_at
       `);
       
       // For each INSTRUCTIONAL member, get allowed candidates
@@ -905,8 +899,9 @@ router.get('/admin/all-groups', async (req, res) => {
       
       group.members = members;
       group.member_count = members.length;
-      group.total_votes_allocated = members.reduce((sum, m) => sum + (m.votes_allocated || 0), 0);
     }
+    
+    console.log(`✅ [PROXY-API] Returning ${groups.length} groups with members`);
     
     res.json({ 
       success: true, 
@@ -916,6 +911,140 @@ router.get('/admin/all-groups', async (req, res) => {
   } catch (error) {
     console.error('Error fetching all proxy groups:', error);
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// Upload manual proxy form to Azure Blob Storage
+router.post('/upload-manual-form', uploadProxyFile, handleUploadError, async (req, res) => {
+  try {
+    console.log('📤 Manual proxy form upload request received');
+    console.log('Request body:', req.body);
+    console.log('File:', req.file);
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded'
+      });
+    }
+
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    // Read file buffer
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const originalFileName = req.file.originalname;
+
+    console.log('📤 Uploading to Azure Blob Storage...');
+    console.log('   User ID:', userId);
+    console.log('   File name:', originalFileName);
+    console.log('   File size:', fileBuffer.length, 'bytes');
+
+    // Upload to Azure Blob Storage
+    const uploadResult = await azureBlobService.uploadFile(
+      userId,
+      fileBuffer,
+      originalFileName,
+      req.file.mimetype || 'application/pdf'
+    );
+
+    console.log('✅ File uploaded to Azure Blob Storage');
+    console.log('   Blob URL:', uploadResult.blobUrl);
+    console.log('   Blob Name:', uploadResult.blobName);
+
+    // Update user record with Azure blob information
+    await database.query(`
+      UPDATE users 
+      SET proxy_file_path = '${uploadResult.blobName}',
+          proxy_file_name = '${uploadResult.fileName}',
+          proxy_uploaded_at = GETDATE()
+      WHERE id = ${userId}
+    `);
+
+    // Delete local temp file
+    try {
+      fs.unlinkSync(req.file.path);
+      console.log('🗑️ Deleted temp file:', req.file.path);
+    } catch (err) {
+      console.warn('⚠️ Could not delete temp file:', err.message);
+    }
+
+    console.log('✅ Manual proxy form uploaded successfully:', {
+      userId,
+      fileName: uploadResult.fileName,
+      blobName: uploadResult.blobName,
+      blobUrl: uploadResult.blobUrl
+    });
+
+    res.json({
+      success: true,
+      message: 'Proxy form uploaded successfully to Azure',
+      data: {
+        fileName: uploadResult.fileName,
+        filePath: uploadResult.blobName,
+        blobUrl: uploadResult.blobUrl,
+        uploadedAt: uploadResult.uploadDate
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error uploading manual proxy form:', error);
+    
+    // Try to delete temp file on error
+    if (req.file && req.file.path) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (err) {
+        // Ignore
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed to upload proxy form: ' + error.message
+    });
+  }
+});
+
+// Download proxy form from Azure Blob Storage
+router.get('/download-proxy-form/:userId/:blobName(*)', async (req, res) => {
+  try {
+    const { userId, blobName } = req.params;
+    console.log('📥 Download request received');
+    console.log('   User ID:', userId);
+    console.log('   Blob Name:', blobName);
+
+    // Reconstruct full blob path if needed
+    const fullBlobName = blobName.startsWith('user-') ? blobName : `user-${userId}/${blobName}`;
+
+    console.log('📥 Downloading from Azure Blob Storage:', fullBlobName);
+
+    // Download from Azure
+    const fileBuffer = await azureBlobService.downloadFile(fullBlobName);
+
+    // Get filename from blob name
+    const fileName = fullBlobName.split('/').pop();
+
+    console.log('✅ File downloaded, sending to client');
+    console.log('   Size:', fileBuffer.length, 'bytes');
+    console.log('   Filename:', fileName);
+
+    // Set headers for PDF download
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${fileName}"`);
+    res.setHeader('Content-Length', fileBuffer.length);
+
+    res.send(fileBuffer);
+  } catch (error) {
+    console.error('❌ Error downloading proxy form:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to download proxy form: ' + error.message
+    });
   }
 });
 

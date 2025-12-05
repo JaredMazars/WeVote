@@ -9,6 +9,7 @@ import {
   Activity,
   Plus,
   Eye,
+  EyeOff,
   TrendingUp,
   Edit,
   Trash2,
@@ -42,7 +43,8 @@ import {
   XCircle,
   Mail,
   Lock,
-  User
+  User,
+  Upload
 } from 'lucide-react';
 import apiService from '../services/api';
 // import AuditService from '../services/auditService';
@@ -75,7 +77,7 @@ interface User {
   email: string;
   role: string;
   avatar?: string;
-  isActive: boolean;
+  active: boolean;
   lastLogin?: string;
   createdAt: string;
   updated_at?: string;
@@ -175,6 +177,7 @@ const AdminDashboard_2: React.FC = () => {
   const [showEditResolutionModal, setShowEditResolutionModal] = useState(false);
   const [showProxyModal, setShowProxyModal] = useState(false);
   const [showVoteLimitsModal, setShowVoteLimitsModal] = useState(false);
+  const [showBulkVoteLimitsModal, setShowBulkVoteLimitsModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editingResolution, setEditingResolution] = useState<any>(null);
@@ -185,13 +188,21 @@ const AdminDashboard_2: React.FC = () => {
     max_votes_allowed: 1,
     min_votes_required: 1
   });
+  const [bulkVoteLimitsForm, setBulkVoteLimitsForm] = useState({
+    vote_weight: 1.0,
+    max_votes_allowed: 1,
+    min_votes_required: 1
+  });
   
   // Registration states
   const [registrationData, setRegistrationData] = useState({
     name: '',
     email: '',
     role_id: 2, // Default to voter
+    proxy_method: 'digital' as 'digital' | 'manual',
+    proxy_file: null as File | null
   });
+
   const [registrationError, setRegistrationError] = useState('');
   const [registrationSuccess, setRegistrationSuccess] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
@@ -231,9 +242,139 @@ const AdminDashboard_2: React.FC = () => {
   });
 
   const [showAgmTimerModal, setShowAgmTimerModal] = useState(false);
-  const [agmStartTime, setAgmStartTime] = useState('15:00');
-  const [agmEndTime, setAgmEndTime] = useState('17:00');
+  const [agmStartTime, setAgmStartTime] = useState('');
+  const [agmEndTime, setAgmEndTime] = useState('');
   const [agmModalError, setAgmModalError] = useState('');
+
+  // Set default AGM times when modal opens
+  const openAgmTimerModal = () => {
+    const now = new Date();
+    const start = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    
+    now.setHours(now.getHours() + 1);
+    const end = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    
+    setAgmStartTime(start);
+    setAgmEndTime(end);
+    setAgmModalError('');
+    setShowAgmTimerModal(true);
+  };
+
+  // AGM Timer Handler
+  const handleSetAgmTimer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAgmModalError('');
+    
+    if (!agmStartTime || !agmEndTime) {
+      setAgmModalError('Please enter both start and end times.');
+      return;
+    }
+
+    try {
+      // Parse time values (HH:MM format)
+      const [startHour, startMin] = agmStartTime.split(':').map(Number);
+      const [endHour, endMin] = agmEndTime.split(':').map(Number);
+      
+      if (isNaN(startHour) || isNaN(startMin) || isNaN(endHour) || isNaN(endMin)) {
+        setAgmModalError('Invalid time format. Please use HH:MM format.');
+        return;
+      }
+      
+      // Create datetime objects for today
+      const now = new Date();
+      const startDateTime = new Date(now);
+      startDateTime.setHours(startHour, startMin, 0, 0);
+      
+      const endDateTime = new Date(now);
+      endDateTime.setHours(endHour, endMin, 0, 0);
+      
+      // If end time is before start time, assume end is tomorrow
+      if (endDateTime <= startDateTime) {
+        endDateTime.setDate(endDateTime.getDate() + 1);
+      }
+      
+      // Validate that start time is not too far in the past (allow 5 minute grace)
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      if (startDateTime < fiveMinutesAgo) {
+        setAgmModalError('Start time cannot be more than 5 minutes in the past.');
+        return;
+      }
+      
+      console.log('🚀 [AGM] Setting timer:', { 
+        startTime: agmStartTime, 
+        endTime: agmEndTime,
+        startDateTime: startDateTime.toISOString(),
+        endDateTime: endDateTime.toISOString()
+      });
+      
+      const response = await fetch('http://localhost:3001/api/admin/agm-timer/start', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ 
+          start: agmStartTime, 
+          end: agmEndTime,
+          startedAt: startDateTime.toISOString()
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ [AGM] Timer response:', result);
+      
+      if (result.success) {
+        setShowAgmTimerModal(false);
+        setAgmModalError('');
+        
+        // Save to localStorage for persistence
+        localStorage.setItem('agmTimerStart', startDateTime.toISOString());
+        localStorage.setItem('agmTimerEndTime', agmEndTime);
+        localStorage.removeItem('agmTimerEnd');
+        
+        // Show success message
+        const isUpcoming = startDateTime > new Date();
+        const minutesUntil = Math.ceil((startDateTime.getTime() - Date.now()) / 60000);
+        
+        alert(
+          isUpcoming 
+            ? `🎉 AGM Timer scheduled!\n\n⏰ Starts: ${startDateTime.toLocaleTimeString()}\n⏰ Ends: ${endDateTime.toLocaleTimeString()}\n📅 Date: ${startDateTime.toLocaleDateString()}\n✅ Starting in ${minutesUntil} minutes`
+            : `🎉 AGM Timer started!\n\n⏰ Started: ${startDateTime.toLocaleTimeString()}\n⏰ Ends: ${endDateTime.toLocaleTimeString()}\n✅ Voting is now active!`
+        );
+        
+        // Dispatch custom event to update timer immediately
+        window.dispatchEvent(new CustomEvent('agmTimerUpdated', {
+          detail: {
+            active: true,
+            start: agmStartTime,
+            end: agmEndTime,
+            startedAt: startDateTime.toISOString()
+          }
+        }));
+      } else {
+        setAgmModalError(result.message || 'Failed to set AGM timer.');
+      }
+    } catch (err: any) {
+      console.error('💥 [AGM] Error setting timer:', err);
+      
+      // Provide specific error messages
+      if (err.message.includes('fetch')) {
+        setAgmModalError('❌ Cannot connect to server. Please ensure the backend is running.');
+      } else if (err.message.includes('400')) {
+        setAgmModalError('❌ Invalid timer data. Please check your inputs.');
+      } else if (err.message.includes('401')) {
+        setAgmModalError('❌ Authentication required. Please log in again.');
+      } else if (err.message.includes('500')) {
+        setAgmModalError('❌ Server error. Please try again in a moment.');
+      } else {
+        setAgmModalError(`❌ Failed to set AGM timer: ${err.message}`);
+      }
+    }
+  };
 
 //   const auditService = AuditService.getInstance();
 
@@ -245,6 +386,7 @@ const AdminDashboard_2: React.FC = () => {
     fetchProxyGroups();
     fetchProxyVotes();
     fetchVoteLogs();
+    fetchAuditLogs();
 
       // Mock comprehensive audit logs
 //       setAuditLogs([
@@ -314,24 +456,32 @@ const AdminDashboard_2: React.FC = () => {
   const fetchUsers = async () => {
     try {
       setLoading(true);
+      setError(null);
+
+      console.log('🔄 AdminDashboard: Fetching users...');
 
       const response = await fetch('http://localhost:3001/api/admin/users', {
         headers: {
           'Content-Type': 'application/json'
         }
       }); 
-      
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
       const result = await response.json(); 
-      console.log("Fetched users", result);
-      if (response.ok) {
+      console.log("✅ AdminDashboard: Fetched users", result);
+      
+      if (result && result.data) {
         setUsers(result.data);
       } else {
-        setError(result.message || 'Failed to fetch users');
+        throw new Error(result.message || 'Invalid response format');
       }
-    } catch (err) {
-      setError('Failed to fetch users');
-      console.error('Error fetching users:', err);
+    } catch (err: any) {
+      console.error('❌ AdminDashboard: Error fetching users:', err);
+      const errorMessage = err.message || 'Failed to fetch users';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -341,6 +491,9 @@ const AdminDashboard_2: React.FC = () => {
   const fetchEmployees = async () => {
     try {
       setLoading(true);
+      setError(null);
+
+      console.log('🔄 AdminDashboard: Fetching employees...');
 
       const response = await fetch('http://localhost:3001/api/admin/employees', {
         headers: {
@@ -348,16 +501,27 @@ const AdminDashboard_2: React.FC = () => {
         }
       }); 
 
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const result = await response.json(); 
-      console.log("Fetched employee users", result);
-      if (response.ok) {
+      console.log("✅ AdminDashboard: Fetched employees", result);
+      
+      if (result && result.data) {
         setEmployees(result.data);
       } else {
-        setError(result.message || 'Failed to fetch employees');
+        throw new Error(result.message || 'Invalid response format');
       }
-    } catch (err) {
-      setError('Failed to fetch employees');
-      console.error('Error fetching employees:', err);
+    } catch (err: any) {
+      console.error('❌ AdminDashboard: Error fetching employees:', err);
+      const errorMessage = err.message || 'Failed to fetch employees';
+      setError(errorMessage);
+      
+      // Don't show error toast if it's just a network blip
+      if (!errorMessage.includes('fetch')) {
+        // Could add toast notification here
+      }
     } finally {
       setLoading(false);
     }
@@ -378,17 +542,21 @@ const AdminDashboard_2: React.FC = () => {
 
   const fetchProxyGroups = async () => {
     try {
+      console.log('🔍 Fetching proxy groups from API...');
       const response = await fetch('http://localhost:3001/api/proxy/admin/all-groups');
       const result = await response.json();
-      console.log("Fetched proxy groups", result);
+      console.log("✅ Fetched proxy groups result:", result);
 
       if (result.success && result.data) {
+        console.log(`📊 Setting ${result.data.length} proxy groups to state`);
         setProxyGroups(result.data);
         setStats(prev => ({ ...prev, totalProxyGroups: result.data.length }));
+      } else {
+        console.warn('⚠️ API response missing data:', result);
       }
     } catch (error) {
-      console.error('Error fetching proxy groups:', error);
-      setError('Failed to fetch proxy groups');
+      console.error('❌ Error fetching proxy groups:', error);
+      console.warn('Unable to fetch proxy groups - API may not be available');
     }
   };
 
@@ -410,17 +578,46 @@ const AdminDashboard_2: React.FC = () => {
 
   const fetchVoteLogs = async () => {
     try {
+      console.log('🔍 Fetching vote logs from API...');
       const response = await fetch('http://localhost:3001/api/admin/votes/logs');
       const result = await response.json();
-      console.log("Fetched vote logs", result);
+      console.log("✅ Fetched vote logs result:", result);
 
       if (result.success && result.logs) {
+        console.log(`📊 Setting ${result.logs.length} vote logs to state`);
         setVoteLogs(result.logs);
         setStats(prev => ({ ...prev, totalVotes: result.logs.length }));
+      } else {
+        console.warn('⚠️ API response missing logs:', result);
       }
     } catch (error) {
-      console.error('Error fetching vote logs:', error);
-      setError('Failed to fetch vote logs');
+      console.error('❌ Error fetching vote logs:', error);
+      console.warn('Unable to fetch vote logs - API may not be available');
+    }
+  };
+
+  const fetchAuditLogs = async () => {
+    try {
+      console.log('🔍 Fetching audit logs from API...');
+      const response = await fetch('http://localhost:3001/api/audit-logs', {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      const result = await response.json();
+      console.log("✅ Fetched audit logs result:", result);
+
+      if (result.success && result.data) {
+        console.log(`📊 Setting ${result.data.length} audit logs to state`);
+        setAuditLogs(result.data);
+        setStats(prev => ({ ...prev, totalAuditLogs: result.data.length }));
+      } else {
+        console.warn('⚠️ API response missing data:', result);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching audit logs:', error);
+      // Don't set error state, just log it
+      console.warn('Unable to fetch audit logs - API may not be available');
     }
   };
 
@@ -465,11 +662,19 @@ const AdminDashboard_2: React.FC = () => {
       return;
     }
 
+    // Validate manual proxy file upload
+    if (registrationData.proxy_method === 'manual' && !registrationData.proxy_file) {
+      setRegistrationError('Please upload a proxy PDF file');
+      setIsRegistering(false);
+      return;
+    }
+
     try {
       const userData = {
         name: registrationData.name,
         email: registrationData.email,
         role_id: registrationData.role_id,
+        proxy_method: registrationData.proxy_method,
         avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(registrationData.name)}&background=0072CE&color=fff`
       };
 
@@ -484,11 +689,34 @@ const AdminDashboard_2: React.FC = () => {
       const result = await response.json();
 
       if (response.ok && result.success) {
+        // If manual proxy method and file exists, upload the file
+        if (registrationData.proxy_method === 'manual' && registrationData.proxy_file) {
+          const formData = new FormData();
+          formData.append('proxy_file', registrationData.proxy_file);
+          formData.append('user_id', result.user.id.toString());
+
+          const uploadResponse = await fetch('http://localhost:3001/api/admin/upload-proxy-file', {
+            method: 'POST',
+            body: formData
+          });
+
+          const uploadResult = await uploadResponse.json();
+          
+          if (!uploadResponse.ok || !uploadResult.success) {
+            console.error('File upload failed:', uploadResult.error);
+            setRegistrationError('Account created but file upload failed. Please contact admin.');
+            setIsRegistering(false);
+            return;
+          }
+        }
+
         setRegistrationSuccess('Account created successfully! A password has been sent to the user\'s email address.');
         setRegistrationData({
           name: '',
           email: '',
-          role_id: 2
+          role_id: 2,
+          proxy_method: 'digital',
+          proxy_file: null
         });
         // Refresh users list
         await fetchUsers();
@@ -675,6 +903,55 @@ const AdminDashboard_2: React.FC = () => {
       }
     } catch (error: any) {
       setError('Error updating vote limits: ' + error.message);
+    }
+  };
+
+  const handleOpenBulkVoteLimits = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:3001/api/admin/vote-splitting/boundaries', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setSuperAdminBoundaries(result.data);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching super admin boundaries:', error);
+    }
+    
+    setShowBulkVoteLimitsModal(true);
+  };
+
+  const handleSaveBulkVoteLimits = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:3001/api/admin/users/vote-limits/bulk', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(bulkVoteLimitsForm)
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        await fetchUsers();
+        setShowBulkVoteLimitsModal(false);
+        alert(`Vote limits updated for ${result.data.updated_count} users!`);
+      } else {
+        setError(result.message || 'Failed to update bulk vote limits');
+      }
+    } catch (error: any) {
+      setError('Error updating bulk vote limits: ' + error.message);
     }
   };
 
@@ -977,116 +1254,7 @@ const AdminDashboard_2: React.FC = () => {
       const result = await response.json();
       console.log('Server response:', result);
       
-      if (response.ok && result.success) {      
-      
-      const [showAgmTimerModal, setShowAgmTimerModal] = useState(false);
-      const [agmStartTime, setAgmStartTime] = useState('15:00');
-      const [agmEndTime, setAgmEndTime] = useState('17:00');
-      const [agmModalError, setAgmModalError] = useState('');
-      
-      const handleSetAgmTimer = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setAgmModalError('');
-        if (!agmStartTime || !agmEndTime) {
-          setAgmModalError('Please enter both start and end times.');
-          return;
-        }
-        try {
-          const response = await fetch('http://localhost:3001/api/admin/agm-timer/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ start: agmStartTime, end: agmEndTime })
-          });
-          const result = await response.json();
-          if (result.success) {
-            setShowAgmTimerModal(false);
-            window.dispatchEvent(new Event('agmTimerUpdated'));
-          } else {
-            setAgmModalError(result.message || 'Failed to set AGM timer.');
-          }
-        } catch (err) {
-          setAgmModalError('Failed to set AGM timer.');
-        }
-      };
-      
-      {/* Add this button to open the modal, near your Start AGM button */}
-      <button
-        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-        onClick={() => setShowAgmTimerModal(true)}
-      >
-        <Clock className="h-4 w-4" />
-        Set AGM Timer
-      </button>
-      
-      {/* AGM Timer Modal */}
-      <AnimatePresence>
-        {showAgmTimerModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-xl font-semibold text-gray-900">Set AGM Voting Timer</h3>
-                <button
-                  onClick={() => setShowAgmTimerModal(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <form onSubmit={handleSetAgmTimer} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Start Time</label>
-                  <input
-                    type="time"
-                    value={agmStartTime}
-                    onChange={e => setAgmStartTime(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">End Time</label>
-                  <input
-                    type="time"
-                    value={agmEndTime}
-                    onChange={e => setAgmEndTime(e.target.value)}
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    required
-                  />
-                </div>
-                {agmModalError && (
-                  <div className="text-red-600 text-sm mb-2">{agmModalError}</div>
-                )}
-                <div className="flex justify-end gap-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => setShowAgmTimerModal(false)}
-                    className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                  >
-                    <Clock className="h-4 w-4" />
-                    Set Timer
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      if (response.ok && result.success) {
         await fetchProxyGroups();
         await fetchProxyVotes();
         
@@ -1275,7 +1443,7 @@ const AdminDashboard_2: React.FC = () => {
             </button>
             <button
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-              onClick={() => setShowAgmTimerModal(true)}
+              onClick={openAgmTimerModal}
             >
               <Clock className="h-4 w-4" />
               Set AGM Timer
@@ -1336,6 +1504,23 @@ const AdminDashboard_2: React.FC = () => {
             color="bg-gradient-to-r from-orange-500 to-orange-600"
             subtitle="System changes tracked"
           />
+        </div>
+
+        {/* AGM Timer Section */}
+        <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100 mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">AGM Timer Management</h3>
+              <p className="text-sm text-gray-500">Set the AGM voting session schedule</p>
+            </div>
+            <button
+              onClick={openAgmTimerModal}
+              className="flex items-center gap-2 bg-gradient-to-r from-green-500 to-green-600 text-white px-6 py-3 rounded-xl hover:from-green-600 hover:to-green-700 transition-all duration-200 shadow-lg"
+            >
+              <Clock className="h-5 w-5" />
+              Set AGM Timer
+            </button>
+          </div>
         </div>
 
         {/* Tab Navigation */}
@@ -1447,6 +1632,100 @@ const AdminDashboard_2: React.FC = () => {
                       </select>
                     </div>
 
+                    {/* Proxy Method Selection */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">
+                        Proxy Submission Method
+                      </label>
+                      <div className="space-y-3">
+                        <label className="flex items-center p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
+                          <input
+                            type="radio"
+                            name="proxy_method"
+                            value="digital"
+                            checked={registrationData.proxy_method === 'digital'}
+                            onChange={(e) => setRegistrationData({ 
+                              ...registrationData, 
+                              proxy_method: e.target.value as 'digital' | 'manual',
+                              proxy_file: null // Clear file if switching to digital
+                            })}
+                            className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="ml-3 flex-1">
+                            <span className="block font-medium text-gray-900">Digital Proxy Form</span>
+                            <span className="block text-sm text-gray-500">Complete proxy form online after registration</span>
+                          </div>
+                          <FileText className="h-5 w-5 text-gray-400" />
+                        </label>
+                        
+                        <label className="flex items-center p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-blue-500 transition-colors">
+                          <input
+                            type="radio"
+                            name="proxy_method"
+                            value="manual"
+                            checked={registrationData.proxy_method === 'manual'}
+                            onChange={(e) => setRegistrationData({ 
+                              ...registrationData, 
+                              proxy_method: e.target.value as 'digital' | 'manual'
+                            })}
+                            className="w-4 h-4 text-blue-600 focus:ring-blue-500"
+                          />
+                          <div className="ml-3 flex-1">
+                            <span className="block font-medium text-gray-900">Manual PDF Upload</span>
+                            <span className="block text-sm text-gray-500">Upload a signed proxy document (PDF only)</span>
+                          </div>
+                          <Upload className="h-5 w-5 text-gray-400" />
+                        </label>
+                      </div>
+                    </div>
+
+                    {/* File Upload (shown only for manual method) */}
+                    {registrationData.proxy_method === 'manual' && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.3 }}
+                      >
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Upload Proxy PDF
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept=".pdf,application/pdf"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                // Validate file type
+                                if (file.type !== 'application/pdf') {
+                                  setRegistrationError('Only PDF files are allowed');
+                                  e.target.value = '';
+                                  return;
+                                }
+                                // Validate file size (5MB)
+                                if (file.size > 5 * 1024 * 1024) {
+                                  setRegistrationError('File size must be less than 5MB');
+                                  e.target.value = '';
+                                  return;
+                                }
+                                setRegistrationData({ ...registrationData, proxy_file: file });
+                                if (registrationError) setRegistrationError('');
+                              }
+                            }}
+                            className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 transition-colors file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            required={registrationData.proxy_method === 'manual'}
+                          />
+                        </div>
+                        {registrationData.proxy_file && (
+                          <div className="mt-2 flex items-center text-sm text-green-600">
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            <span>{registrationData.proxy_file.name} ({(registrationData.proxy_file.size / 1024).toFixed(2)} KB)</span>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                       <div className="flex items-center space-x-2">
                         <Mail className="h-5 w-5 text-blue-500" />
@@ -1489,13 +1768,22 @@ const AdminDashboard_2: React.FC = () => {
                 <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
                   <div className="flex items-center justify-between mb-6">
                     <h3 className="text-lg font-semibold text-gray-900">User Management</h3>
-                    <button
-                      onClick={() => setShowAddUserModal(true)}
-                      className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add User
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={handleOpenBulkVoteLimits}
+                        className="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors"
+                      >
+                        <Settings className="h-4 w-4" />
+                        Bulk Set Vote Limits
+                      </button>
+                      <button
+                        onClick={() => setShowAddUserModal(true)}
+                        className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add User
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-4 mb-6">
@@ -1526,7 +1814,7 @@ const AdminDashboard_2: React.FC = () => {
                         <tr className="border-b border-gray-200">
                           <th className="text-left py-3 px-4 font-semibold text-gray-700">User</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700">Role</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Vote Limits</th>
+                          {/* <th className="text-left py-3 px-4 font-semibold text-gray-700">Vote Limits</th> */}
                           <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700">Last Login</th>
                           <th className="text-left py-3 px-4 font-semibold text-gray-700">Created</th>
@@ -1565,7 +1853,7 @@ const AdminDashboard_2: React.FC = () => {
                                   {user.role}
                                 </span>
                               </td>
-                              <td className="py-4 px-4">
+                              {/* <td className="py-4 px-4">
                                 <div className="text-sm">
                                   <div className="font-medium text-gray-900">Weight: {user.vote_weight || 1.0}x</div>
                                   <div className="text-gray-500">Range: {user.min_votes_required || 1} - {user.max_votes_allowed || 1}</div>
@@ -1573,11 +1861,11 @@ const AdminDashboard_2: React.FC = () => {
                                     <div className="text-xs text-gray-400 mt-1">Set by: {user.vote_limit_set_by}</div>
                                   )}
                                 </div>
-                              </td>
+                              </td> */}
                               <td className="py-4 px-4">
                                 <div className="flex items-center gap-2">
-                                  <div className={`w-2 h-2 rounded-full ${user.isActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                  <span className="text-sm">{user.isActive ? 'Active' : 'Inactive'}</span>
+                                  <div className={`w-2 h-2 rounded-full ${user.active ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                  <span className="text-sm">{user.active ? 'Active' : 'Inactive'}</span>
                                   {user.email_verified && <CheckCircle className="h-4 w-4 text-green-500" />}
                                 </div>
                               </td>
@@ -1909,7 +2197,7 @@ const AdminDashboard_2: React.FC = () => {
                         <div>
                           <p className="text-sm text-green-600 font-medium">Votes Allocated</p>
                           <p className="text-2xl font-bold text-green-900">
-                            {proxyGroups.reduce((sum, g) => sum + (g.total_votes_allocated || 0), 0)}
+                            {proxyGroups.reduce((sum, g) => sum + ((g as any).total_votes_allocated || 0), 0)}
                           </p>
                         </div>
                         <Vote className="h-8 w-8 text-green-400" />
@@ -2077,135 +2365,151 @@ const AdminDashboard_2: React.FC = () => {
               </div>
             )}
 
-            {/* Vote Logs Tab */}
+            {/* Vote Logs Tab - Card Based Layout */}
             {activeTab === 'votes' && (
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-900 mb-6">Vote Activity Logs</h3>
-
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="relative flex-1 max-w-md">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search by voter email or comment..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg font-semibold text-gray-900">Vote History ({voteLogs.length})</h3>
+                  <div className="flex items-center gap-3">
+                    <select
+                      value={filterType}
+                      onChange={(e) => setFilterType(e.target.value)}
+                      className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Votes</option>
+                      <option value="employee">Employee Votes</option>
+                      <option value="resolution">Resolution Votes</option>
+                    </select>
                   </div>
-                  <select
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">All Vote Types</option>
-                    <option value="employee">Employee Votes</option>
-                    <option value="resolution">Resolution Votes</option>
-                  </select>
+                </div>
+
+                <div className="relative mb-6">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search by voter email..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
 
                 {voteLogs.length === 0 ? (
                   <div className="text-center py-12">
+                    <Vote className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                     <p className="text-gray-500">No vote logs found</p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full table-auto">
-                      <thead>
-                        <tr className="border-b border-gray-200 bg-gray-50">
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Voter</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Type</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Target ID</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Choice</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Weight</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Timestamp</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">IP</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Anonymous</th>
-                          <th className="text-left py-3 px-4 font-semibold text-gray-700">Comment</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {voteLogs
-                          .filter(
-                            (log) =>
-                              (filterType === 'all' || log.vote_type === filterType) &&
-                              (log.voter_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              log.comment?.toLowerCase().includes(searchTerm.toLowerCase()))
-                          )
-                          .map((log) => (
-                            <tr key={log.id} className="border-b border-gray-100 hover:bg-gray-50">
-                              <td className="py-4 px-4 text-sm">
-                                <div className="font-medium text-gray-900">
-                                  {log.is_anonymous ? '(Anonymous)' : log.voter_email || `User ${log.voter_id}`}
-                                </div>
-                              </td>
-                              <td className="py-4 px-4 text-sm">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                  log.vote_type === 'employee' 
-                                    ? 'bg-blue-100 text-blue-800' 
-                                    : 'bg-purple-100 text-purple-800'
-                                }`}>
-                                  {log.vote_type}
-                                </span>
-                              </td>
-                              <td className="py-4 px-4 text-sm text-gray-900">
-                                {log.vote_type === 'employee' 
-                                  ? log.employee_id ?? '-' 
-                                  : log.resolution_id ?? '-'}
-                              </td>
-                              <td className="py-4 px-4 text-sm">
-                                {log.vote_choice ? (
-                                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                                    log.vote_choice === 'YES' 
-                                      ? 'bg-green-100 text-green-800'
-                                      : log.vote_choice === 'NO'
-                                      ? 'bg-red-100 text-red-800'
-                                      : 'bg-gray-100 text-gray-800'
+                  <div className="space-y-3">
+                    {voteLogs
+                      .filter(
+                        (log) =>
+                          (filterType === 'all' || log.vote_type === filterType) &&
+                          (log.voter_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          log.comment?.toLowerCase().includes(searchTerm.toLowerCase()))
+                      )
+                      .map((log) => (
+                        <motion.div
+                          key={log.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-gradient-to-r from-gray-50 to-white border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-start space-x-4 flex-1">
+                              {/* Avatar/Icon */}
+                              <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                                {log.is_anonymous ? '?' : (log.voter_email?.[0]?.toUpperCase() || 'U')}
+                              </div>
+
+                              {/* Content */}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h4 className="font-semibold text-gray-900 truncate">
+                                    {log.is_anonymous ? 'Anonymous Voter' : log.voter_email || `User ${log.voter_id}`}
+                                  </h4>
+                                  <span className="text-xs text-gray-500">•</span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    log.vote_type === 'employee' 
+                                      ? 'bg-blue-100 text-blue-700' 
+                                      : 'bg-purple-100 text-purple-700'
                                   }`}>
-                                    {log.vote_choice}
+                                    {log.vote_type} vote
                                   </span>
-                                ) : (
-                                  '-'
-                                )}
-                              </td>
-                              <td className="py-4 px-4 text-sm font-medium text-gray-900">
-                                {log.vote_weight ?? 1}x
-                              </td>
-                              <td className="py-4 px-4 text-sm text-gray-500">
-                                {new Date(log.created_at).toLocaleString('en-US', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                  hour: '2-digit',
-                                  minute: '2-digit'
-                                })}
-                              </td>
-                              <td className="py-4 px-4 text-sm font-mono text-gray-500">
-                                {log.ip_address || 'N/A'}
-                              </td>
-                              <td className="py-4 px-4">
-                                {log.is_anonymous ? (
-                                  <CheckCircle className="h-4 w-4 text-green-500" />
-                                ) : (
-                                  <X className="h-4 w-4 text-red-500" />
-                                )}
-                              </td>
-                              <td className="py-4 px-4 text-sm text-gray-500 max-w-xs">
-                                <div className="truncate" title={log.comment || ''}>
-                                  {log.comment || '-'}
                                 </div>
-                              </td>
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
+
+                                <p className="text-sm text-gray-600 mb-2">
+                                  <span className="font-medium">VOTE</span>
+                                  {log.vote_choice && (
+                                    <span className={`ml-2 px-2 py-0.5 rounded text-xs font-semibold ${
+                                      log.vote_choice === 'YES' 
+                                        ? 'bg-green-100 text-green-800'
+                                        : log.vote_choice === 'NO'
+                                        ? 'bg-red-100 text-red-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                    }`}>
+                                      {log.vote_choice}
+                                    </span>
+                                  )}
+                                </p>
+
+                                {log.comment && (
+                                  <p className="text-sm text-gray-500 italic mb-2">"{log.comment}"</p>
+                                )}
+
+                                <div className="flex items-center gap-4 text-xs text-gray-500">
+                                  <div className="flex items-center gap-1">
+                                    <Clock className="h-3 w-3" />
+                                    {new Date(log.created_at).toLocaleString('en-US', {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="font-medium">Weight:</span> {log.vote_weight ?? 1}
+                                  </div>
+                                  {log.ip_address && (
+                                    <div className="flex items-center gap-1">
+                                      <span className="font-medium">IP:</span> {log.ip_address}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right Side - Vote Details */}
+                            <div className="text-right ml-4 flex-shrink-0">
+                              <div className="text-sm font-semibold text-gray-900 mb-1">
+                                {log.vote_type === 'employee' ? 'Employee' : 'Resolution'}
+                              </div>
+                              <div className="text-xs text-gray-500">
+                                ID: {log.vote_type === 'employee' ? log.employee_id : log.resolution_id}
+                              </div>
+                              {log.is_anonymous && (
+                                <div className="mt-2">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-700 rounded text-xs">
+                                    <EyeOff className="h-3 w-3" />
+                                    Anonymous
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
                   </div>
                 )}
 
                 {voteLogs.length > 0 && (
-                  <div className="mt-4 text-sm text-gray-500 text-center">
-                    Showing {voteLogs.length} vote{voteLogs.length !== 1 ? 's' : ''}
+                  <div className="mt-6 pt-4 border-t border-gray-200 text-sm text-gray-500 text-center">
+                    Showing {voteLogs.filter((log) =>
+                      (filterType === 'all' || log.vote_type === filterType) &&
+                      (log.voter_email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                      log.comment?.toLowerCase().includes(searchTerm.toLowerCase()))
+                    ).length} of {voteLogs.length} vote{voteLogs.length !== 1 ? 's' : ''}
                   </div>
                 )}
               </div>
@@ -2228,13 +2532,13 @@ const AdminDashboard_2: React.FC = () => {
                                     onChange={(e) => setAuditFilter(e.target.value)}
                                     className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                                   >
-                                    <option value="all">All Tables</option>
-                                    <option value="users">Users</option>
-                                    <option value="votes">Votes</option>
-                                    <option value="employees">Employees</option>
-                                    <option value="resolutions">Resolutions</option>
-                                    <option value="proxy_groups">Proxy Groups</option>
-                                    <option value="proxy_votes">Proxy Votes</option>
+                                    <option value="all">All Categories</option>
+                                    <option value="AUTH">Authentication</option>
+                                    <option value="VOTE">Voting</option>
+                                    <option value="ADMIN">Administration</option>
+                                    <option value="PROXY">Proxy</option>
+                                    <option value="TIMER">Timer</option>
+                                    <option value="SYSTEM">System</option>
                                   </select>
                                   <button className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
                                     <Download className="h-4 w-4" />
@@ -2247,10 +2551,10 @@ const AdminDashboard_2: React.FC = () => {
                                 <table className="w-full">
                                   <thead>
                                     <tr className="border-b border-gray-200">
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Table</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Operation</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Record ID</th>
-                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Changed By</th>
+                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Category</th>
+                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Action</th>
+                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">User ID</th>
+                                      <th className="text-left py-3 px-4 font-semibold text-gray-700">Status</th>
                                       <th className="text-left py-3 px-4 font-semibold text-gray-700">Timestamp</th>
                                       <th className="text-left py-3 px-4 font-semibold text-gray-700">IP Address</th>
                                       <th className="text-left py-3 px-4 font-semibold text-gray-700">Description</th>
@@ -2258,81 +2562,98 @@ const AdminDashboard_2: React.FC = () => {
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {auditLogs
-                                      .filter(log => auditFilter === 'all' || log.table_name === auditFilter)
-                                      .map((log) => (
-                                        <React.Fragment key={log.id}>
-                                          <tr className="border-b border-gray-100 hover:bg-gray-50">
-                                            <td className="py-4 px-4">
-                                              <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-sm font-mono">
-                                                {log.table_name}
-                                              </span>
-                                            </td>
-                                            <td className="py-4 px-4">
-                                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                                log.operation === 'INSERT' ? 'bg-green-100 text-green-700' :
-                                                log.operation === 'UPDATE' ? 'bg-yellow-100 text-yellow-700' :
-                                                'bg-red-100 text-red-700'
-                                              }`}>
-                                                {log.operation}
-                                              </span>
-                                            </td>
-                                            <td className="py-4 px-4 font-mono text-sm">{log.record_id}</td>
-                                            {/* <td className="py-4 px-4">
-                                              <div className="font-medium">{log.changed_by}</div>
-                                              <div className="text-sm text-gray-500">ID: {log.changed_by_id}</div>
-                                            </td> */}
-                                            {/* <td className="py-4 px-4 text-sm text-gray-500">
-                                              {new Date(log.changed_at).toLocaleString()}
-                                            </td> */}
-                                            <td className="py-4 px-4 text-sm text-gray-500 font-mono">
-                                              {log.ip_address || 'N/A'}
-                                            </td>
-                                            <td className="py-4 px-4 text-sm text-gray-600 max-w-xs truncate">
-                                              {log.description}
-                                            </td>
-                                            <td className="py-4 px-4">
-                                              <button
-                                                onClick={() => setExpandedAuditLog(expandedAuditLog === log.id ? null : log.id)}
-                                                className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
-                                              >
-                                                {expandedAuditLog === log.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                                {expandedAuditLog === log.id ? 'Hide' : 'Show'}
-                                              </button>
-                                            </td>
-                                          </tr>
-                                          {expandedAuditLog === log.id && (
-                                            <tr>
-                                              <td colSpan={8} className="py-4 px-4 bg-gray-50">
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                  {log.old_values && (
-                                                    <div>
-                                                      <h5 className="font-medium text-gray-700 mb-2">Old Values:</h5>
-                                                      <pre className="bg-red-50 border border-red-200 rounded p-3 text-xs overflow-x-auto">
-                                                        {JSON.stringify(log.old_values, null, 2)}
-                                                      </pre>
-                                                    </div>
-                                                  )}
-                                                  {log.new_values && (
-                                                    <div>
-                                                      <h5 className="font-medium text-gray-700 mb-2">New Values:</h5>
-                                                      <pre className="bg-green-50 border border-green-200 rounded p-3 text-xs overflow-x-auto">
-                                                        {JSON.stringify(log.new_values, null, 2)}
-                                                      </pre>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                                {log.user_agent && (
-                                                  <div className="mt-3">
-                                                    <h5 className="font-medium text-gray-700 mb-1">User Agent:</h5>
-                                                    <p className="text-xs text-gray-600 font-mono">{log.user_agent}</p>
-                                                  </div>
-                                                )}
+                                    {auditLogs.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={8} className="py-8 text-center text-gray-500">
+                                          No audit logs found. Activity will appear here once users start interacting with the system.
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      auditLogs
+                                        .filter(log => auditFilter === 'all' || log.action_category === auditFilter)
+                                        .map((log) => (
+                                          <React.Fragment key={log.id}>
+                                            <tr className="border-b border-gray-100 hover:bg-gray-50">
+                                              <td className="py-4 px-4">
+                                                <span className={`px-2 py-1 rounded text-sm font-medium ${
+                                                  log.action_category === 'AUTH' ? 'bg-blue-100 text-blue-700' :
+                                                  log.action_category === 'VOTE' ? 'bg-green-100 text-green-700' :
+                                                  log.action_category === 'ADMIN' ? 'bg-purple-100 text-purple-700' :
+                                                  log.action_category === 'PROXY' ? 'bg-orange-100 text-orange-700' :
+                                                  log.action_category === 'TIMER' ? 'bg-yellow-100 text-yellow-700' :
+                                                  'bg-gray-100 text-gray-700'
+                                                }`}>
+                                                  {log.action_category}
+                                                </span>
+                                              </td>
+                                              <td className="py-4 px-4">
+                                                <span className="text-sm font-mono text-gray-700">
+                                                  {log.action_type}
+                                                </span>
+                                              </td>
+                                              <td className="py-4 px-4 font-mono text-sm">{log.user_id || 'N/A'}</td>
+                                              <td className="py-4 px-4">
+                                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                                  log.status === 'success' ? 'bg-green-100 text-green-700' :
+                                                  log.status === 'failure' ? 'bg-red-100 text-red-700' :
+                                                  'bg-yellow-100 text-yellow-700'
+                                                }`}>
+                                                  {log.status}
+                                                </span>
+                                              </td>
+                                              <td className="py-4 px-4 text-sm text-gray-500">
+                                                {new Date(log.created_at).toLocaleString()}
+                                              </td>
+                                              <td className="py-4 px-4 text-sm text-gray-500 font-mono">
+                                                {log.ip_address || 'N/A'}
+                                              </td>
+                                              <td className="py-4 px-4 text-sm text-gray-600 max-w-xs truncate">
+                                                {log.description}
+                                              </td>
+                                              <td className="py-4 px-4">
+                                                <button
+                                                  onClick={() => setExpandedAuditLog(expandedAuditLog === log.id ? null : log.id)}
+                                                  className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center gap-1"
+                                                >
+                                                  {expandedAuditLog === log.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                                  {expandedAuditLog === log.id ? 'Hide' : 'Show'}
+                                                </button>
                                               </td>
                                             </tr>
-                                          )}
-                                        </React.Fragment>
-                                      ))}
+                                            {expandedAuditLog === log.id && (
+                                              <tr>
+                                                <td colSpan={8} className="py-4 px-4 bg-gray-50">
+                                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    {log.entity_type && (
+                                                      <div>
+                                                        <h5 className="font-medium text-gray-700 mb-2">Entity:</h5>
+                                                        <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm">
+                                                          <p><strong>Type:</strong> {log.entity_type}</p>
+                                                          <p><strong>ID:</strong> {log.entity_id || 'N/A'}</p>
+                                                        </div>
+                                                      </div>
+                                                    )}
+                                                    {log.metadata && (
+                                                      <div>
+                                                        <h5 className="font-medium text-gray-700 mb-2">Metadata:</h5>
+                                                        <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs overflow-x-auto">
+                                                          {JSON.stringify(log.metadata, null, 2)}
+                                                        </pre>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                  {log.user_agent && (
+                                                    <div className="mt-3">
+                                                      <h5 className="font-medium text-gray-700 mb-1">User Agent:</h5>
+                                                      <p className="text-xs text-gray-600 font-mono">{log.user_agent}</p>
+                                                    </div>
+                                                  )}
+                                                </td>
+                                              </tr>
+                                            )}
+                                          </React.Fragment>
+                                        ))
+                                    )}
                                   </tbody>
                                 </table>
                               </div>
@@ -2343,6 +2664,139 @@ const AdminDashboard_2: React.FC = () => {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* AGM Timer Modal */}
+      <AnimatePresence>
+        {showAgmTimerModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) setShowAgmTimerModal(false);
+            }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white rounded-2xl p-8 max-w-md w-full shadow-2xl border border-gray-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="text-center mb-8">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-green-500 to-green-600 rounded-2xl mb-4">
+                  <Clock className="h-8 w-8 text-white" />
+                </div>
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">Set AGM Voting Timer</h3>
+                <p className="text-gray-500">Configure voting time window</p>
+              </div>
+
+              {agmModalError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center space-x-3"
+                >
+                  <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                  <p className="text-red-700 text-sm">{agmModalError}</p>
+                </motion.div>
+              )}
+
+              <form onSubmit={handleSetAgmTimer} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Start Time
+                  </label>
+                  <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="time"
+                      value={agmStartTime}
+                      onChange={(e) => {
+                        setAgmStartTime(e.target.value);
+                        if (agmModalError) setAgmModalError('');
+                      }}
+                      className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 transition-colors text-lg"
+                      required
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 ml-12">
+                    When voting begins
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    End Time
+                  </label>
+                  <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="time"
+                      value={agmEndTime}
+                      onChange={(e) => {
+                        setAgmEndTime(e.target.value);
+                        if (agmModalError) setAgmModalError('');
+                      }}
+                      className="w-full pl-12 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 transition-colors text-lg"
+                      required
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 ml-12">
+                    When voting ends
+                  </p>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <Clock className="h-5 w-5 text-blue-500" />
+                    <p className="text-blue-700 text-sm font-medium">
+                      Important
+                    </p>
+                  </div>
+                  <p className="text-blue-600 text-xs ml-7">
+                    Setting the AGM timer will activate the voting period. Members can only vote during this time window.
+                  </p>
+                </div>
+
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle className="h-5 w-5 text-green-500" />
+                    <p className="text-green-700 text-sm font-medium">
+                      Timer will be visible to all users in the header
+                    </p>
+                  </div>
+                  <p className="text-green-600 text-xs mt-1 ml-7">
+                    The countdown will automatically sync across all users and browser tabs.
+                  </p>
+                </div>
+
+                <div className="flex space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAgmTimerModal(false)}
+                    className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    type="submit"
+                    className="flex-1 bg-gradient-to-r from-green-500 to-green-600 text-white py-3 rounded-xl font-medium hover:shadow-lg transition-all duration-200"
+                  >
+                    <div className="flex items-center justify-center space-x-2">
+                      <Clock className="h-5 w-5" />
+                      <span>Set Timer</span>
+                    </div>
+                  </motion.button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Add User Modal */}
       <AnimatePresence>
@@ -2508,8 +2962,8 @@ const AdminDashboard_2: React.FC = () => {
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                   <select
-                    value={editingUser.isActive ? 'active' : 'inactive'}
-                    onChange={(e) => setEditingUser({ ...editingUser, isActive: e.target.value === 'active' })}
+                    value={editingUser.active ? 'active' : 'inactive'}
+                    onChange={(e) => setEditingUser({ ...editingUser, active: e.target.value === 'active' })}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="active">Active</option>
@@ -2579,7 +3033,7 @@ const AdminDashboard_2: React.FC = () => {
               </div>
               
               <div className="space-y-4">
-                <div>
+                {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Vote Weight (0.1 - 10.0)
                   </label>
@@ -2596,7 +3050,7 @@ const AdminDashboard_2: React.FC = () => {
                   <p className="text-xs text-gray-500 mt-1">
                     Multiplier for vote calculations (e.g., 1.5x vote weight)
                   </p>
-                </div>
+                </div> */}
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -2649,6 +3103,135 @@ const AdminDashboard_2: React.FC = () => {
                   >
                     <Save className="h-4 w-4" />
                     Save Limits
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Bulk Set Vote Limits Modal */}
+      <AnimatePresence>
+        {showBulkVoteLimitsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900">Bulk Set Vote Limits</h3>
+                  <p className="text-sm text-gray-500 mt-1">Apply limits to all users at once</p>
+                </div>
+                <button
+                  onClick={() => setShowBulkVoteLimitsModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Super Admin Boundaries Display */}
+              <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <Shield className="h-5 w-5 text-purple-600" />
+                  <h4 className="font-semibold text-purple-900">Super Admin Boundaries</h4>
+                </div>
+                <p className="text-sm text-purple-700">
+                  Individual votes must be between <strong>{superAdminBoundaries.min_individual_votes}</strong> and <strong>{superAdminBoundaries.max_individual_votes}</strong>
+                </p>
+              </div>
+
+              {/* Warning Notice */}
+              <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="h-5 w-5 text-yellow-600" />
+                  <h4 className="font-semibold text-yellow-900">Warning</h4>
+                </div>
+                <p className="text-sm text-yellow-700">
+                  This will apply the same vote limits to <strong>all users</strong> in the system. This action cannot be undone easily.
+                </p>
+              </div>
+              
+              <div className="space-y-4">
+                {/* <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Vote Weight (0.1 - 10.0)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    max="10"
+                    value={bulkVoteLimitsForm.vote_weight}
+                    onChange={(e) => setBulkVoteLimitsForm({ ...bulkVoteLimitsForm, vote_weight: parseFloat(e.target.value) })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Multiplier for vote calculations (e.g., 1.5x vote weight)
+                  </p>
+                </div> */}
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Maximum Votes Allowed
+                  </label>
+                  <input
+                    type="number"
+                    min={superAdminBoundaries.min_individual_votes}
+                    max={superAdminBoundaries.max_individual_votes}
+                    value={bulkVoteLimitsForm.max_votes_allowed}
+                    onChange={(e) => setBulkVoteLimitsForm({ ...bulkVoteLimitsForm, max_votes_allowed: parseInt(e.target.value) })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Must be within super admin boundaries ({superAdminBoundaries.min_individual_votes} - {superAdminBoundaries.max_individual_votes})
+                  </p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Minimum Votes Required
+                  </label>
+                  <input
+                    type="number"
+                    min={superAdminBoundaries.min_individual_votes}
+                    max={bulkVoteLimitsForm.max_votes_allowed}
+                    value={bulkVoteLimitsForm.min_votes_required}
+                    onChange={(e) => setBulkVoteLimitsForm({ ...bulkVoteLimitsForm, min_votes_required: parseInt(e.target.value) })}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Must be ≥ {superAdminBoundaries.min_individual_votes} and ≤ max votes allowed
+                  </p>
+                </div>
+                
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowBulkVoteLimitsModal(false)}
+                    className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveBulkVoteLimits}
+                    className="flex items-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+                  >
+                    <Users className="h-4 w-4" />
+                    Apply to All Users
                   </button>
                 </div>
               </div>
@@ -3234,6 +3817,119 @@ const AdminDashboard_2: React.FC = () => {
                   >
                     <GitBranch className="h-4 w-4" />
                     Create Proxy Group
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* AGM Timer Modal */}
+      <AnimatePresence>
+        {showAgmTimerModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl flex items-center justify-center">
+                    <Clock className="h-6 w-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold text-gray-900">Set AGM Voting Timer</h3>
+                    <p className="text-sm text-gray-500">Configure voting time window</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    setShowAgmTimerModal(false);
+                    setAgmModalError('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSetAgmTimer} className="space-y-5">
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-blue-800">
+                      <p className="font-medium mb-1">Important:</p>
+                      <p>Setting the AGM timer will activate the voting period. Members can only vote during this time window.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Clock className="h-4 w-4 inline mr-1" />
+                    Start Time
+                  </label>
+                  <input
+                    type="time"
+                    value={agmStartTime}
+                    onChange={e => setAgmStartTime(e.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">When voting begins</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Clock className="h-4 w-4 inline mr-1" />
+                    End Time
+                  </label>
+                  <input
+                    type="time"
+                    value={agmEndTime}
+                    onChange={e => setAgmEndTime(e.target.value)}
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">When voting ends</p>
+                </div>
+
+                {agmModalError && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-center gap-2"
+                  >
+                    <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0" />
+                    <p className="text-sm text-red-700">{agmModalError}</p>
+                  </motion.div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAgmTimerModal(false);
+                      setAgmModalError('');
+                    }}
+                    className="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-lg hover:from-indigo-700 hover:to-indigo-800 transition-all duration-200 shadow-lg font-medium"
+                  >
+                    <Clock className="h-4 w-4" />
+                    Set Timer
                   </button>
                 </div>
               </form>

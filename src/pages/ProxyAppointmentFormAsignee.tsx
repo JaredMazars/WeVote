@@ -11,7 +11,8 @@ import {
   Eye,
   EyeOff,
   Share2,
-  Trash2
+  Trash2,
+  AlertCircle
 } from 'lucide-react';
 
 const API_BASE_URL = 'http://localhost:3001';
@@ -51,6 +52,7 @@ interface ProxyFormData {
     surname: string;
     membershipNumber: string;
     idPassportNumber: string;
+    votesAllocated: number;
   }[];
 }
 
@@ -93,7 +95,8 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
       fullNames: '',
       surname: '',
       membershipNumber: '',
-      idPassportNumber: ''
+      idPassportNumber: '',
+      votesAllocated: 0
     }]
   });
 
@@ -264,14 +267,23 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
     if (!assignee.name) newErrors.assigneeName = 'Assignee details not loaded. Please refresh the page.';
     if (!assignee.memberNumber) newErrors.assigneeMemberNumber = 'Assignee membership number missing.';
     
-    // Validate vote allocation
+    // Validate vote allocation across all proxy members
     if (principalMember && principalMember.totalVotes > 0) {
-      if (assignee.votesAllocated <= 0) {
-        newErrors.votesAllocated = 'Please allocate at least 1 vote to the proxy member.';
+      const totalAllocated = formData.proxyGroupMembers.reduce((sum, member) => sum + (member.votesAllocated || 0), 0);
+      
+      if (totalAllocated === 0) {
+        newErrors.votesAllocated = 'Please allocate at least 1 vote to proxy members.';
       }
-      if (assignee.votesAllocated > principalMember.totalVotes) {
-        newErrors.votesAllocated = `Cannot allocate more than ${principalMember.totalVotes} votes.`;
+      if (totalAllocated > principalMember.totalVotes) {
+        newErrors.votesAllocated = `Total allocated votes (${totalAllocated}) cannot exceed available votes (${principalMember.totalVotes}).`;
       }
+      
+      // Check each member has at least 1 vote if votes are allocated
+      formData.proxyGroupMembers.forEach((member, index) => {
+        if ((member.votesAllocated || 0) < 0) {
+          newErrors[`proxyMember${index}Votes`] = 'Votes cannot be negative';
+        }
+      });
     }
     
     // Validate allowed candidates for instructional assignee
@@ -469,7 +481,7 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
     }
   };
 
-  const handleProxyMemberChange = (index: number, field: keyof ProxyFormData['proxyGroupMembers'][0], value: string) => {
+  const handleProxyMemberChange = (index: number, field: keyof ProxyFormData['proxyGroupMembers'][0], value: string | number) => {
     const updatedMembers = [...formData.proxyGroupMembers];
     updatedMembers[index] = { ...updatedMembers[index], [field]: value };
     setFormData(prev => ({ ...prev, proxyGroupMembers: updatedMembers }));
@@ -491,7 +503,8 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
           fullNames: '',
           surname: '',
           membershipNumber: '',
-          idPassportNumber: ''
+          idPassportNumber: '',
+          votesAllocated: 0
         }
       ]
     }));
@@ -853,11 +866,14 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
                     </div>
                   </div>
                 )}
+
+                
               </div>
+
               
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  ID/Passport Number {!showSensitiveData && <span className="text-red-500">(CENSORED)</span>}
+                  ID/Passport Numbers {!showSensitiveData && <span className="text-red-500">(CENSORED)</span>}
                 </label>
                 <input
                   type="text"
@@ -871,7 +887,64 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
                 />
                 {errors.idPassportNumber && <p className="text-red-500 text-sm mt-1">{errors.idPassportNumber}</p>}
               </div>
+
+              {/* Votes to Allocate - Only show when principal member is found */}
+              {principalMember && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <div className="flex items-center space-x-2">
+                      <Vote className="h-4 w-4 text-blue-600" />
+                      <span>Votes to Allocate</span>
+                    </div>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max={principalMember.totalVotes}
+                    value={assignee.votesAllocated}
+                    onChange={(e) => handleVoteAllocation(parseInt(e.target.value) || 0)}
+                    placeholder="Enter votes"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    This proxy will receive {assignee.votesAllocated || 0} of your votes
+                  </p>
+                  {errors.votesAllocated && (
+                    <p className="text-red-500 text-sm mt-1">{errors.votesAllocated}</p>
+                  )}
+                </div>
+              )}
             </div>
+
+            {/* Vote Allocation Summary - Shows comprehensive vote breakdown */}
+            {principalMember && (
+              <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center space-x-2 mb-4">
+                  <Vote className="h-5 w-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold text-gray-900">Vote Allocation Summary</h3>
+                </div>
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-2xl font-bold text-blue-900">{principalMember.totalVotes}</p>
+                    <p className="text-xs text-blue-700">Available Votes</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-green-900">{assignee.votesAllocated || 0}</p>
+                    <p className="text-xs text-green-700">Allocated</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-gray-900">{principalMember.totalVotes - (assignee.votesAllocated || 0)}</p>
+                    <p className="text-xs text-gray-700">Remaining</p>
+                  </div>
+                </div>
+                {errors.voteAllocation && (
+                  <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded flex items-center space-x-2">
+                    <AlertCircle className="h-4 w-4 text-red-600" />
+                    <p className="text-red-700 text-sm font-medium">{errors.voteAllocation}</p>
+                  </div>
+                )}
+              </div>
+            )}
           </motion.div>
 
           {/* Section 2: Proxy Appointment Type */}
@@ -1098,6 +1171,35 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
               </button> */}
             </div>
 
+            {/* Vote Allocation Summary */}
+            {principalMember && (
+              <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="grid grid-cols-3 gap-4 text-center">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Total Available Votes</p>
+                    <p className="text-2xl font-bold text-blue-600">{principalMember.totalVotes}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Allocated Votes</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {formData.proxyGroupMembers.reduce((sum, member) => sum + (member.votesAllocated || 0), 0)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Remaining Votes</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {principalMember.totalVotes - formData.proxyGroupMembers.reduce((sum, member) => sum + (member.votesAllocated || 0), 0)}
+                    </p>
+                  </div>
+                </div>
+                {errors.votesAllocated && (
+                  <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-center">
+                    <p className="text-red-700 text-sm font-medium">{errors.votesAllocated}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {errors.proxyMembers && <p className="text-red-500 text-sm mb-4">{errors.proxyMembers}</p>}
             
             <div className="space-y-6">
@@ -1177,6 +1279,8 @@ const ProxyAppointmentFormAsignee: React.FC<ProxyFormProps> = ({ formId, isPrevi
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </div>
+
+                  
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">

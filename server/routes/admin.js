@@ -5,6 +5,20 @@ import Vote from '../models/Vote.js';
 // import auth from '../middleware/auth.js';
 import { body, validationResult } from 'express-validator';
 import Resolution from '../models/Resolution.js';
+import { 
+  logUserCreated, 
+  logUserUpdated, 
+  logUserDeleted,
+  logUserStatusChanged  // Add this import
+} from '../middleware/auditLogger.js';
+import { uploadProxyFile, handleUploadError } from '../middleware/upload.js';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 
 const router = express.Router();
@@ -30,9 +44,18 @@ let agmTimer = {
 // Start AGM timer
 router.post('/agm-timer/start', (req, res) => {
   agmTimer.active = true;
-  agmTimer.startedAt = new Date();
+  // Use the startedAt timestamp from frontend if provided, otherwise use current time
+  agmTimer.startedAt = req.body.startedAt ? new Date(req.body.startedAt) : new Date();
   agmTimer.start = req.body.start || '12:00';
   agmTimer.end = req.body.end || '00:00';
+  
+  console.log('🎯 AGM Timer started:', {
+    active: agmTimer.active,
+    start: agmTimer.start,
+    end: agmTimer.end,
+    startedAt: agmTimer.startedAt
+  });
+  
   res.json({ success: true, agmTimer });
 });
 
@@ -75,6 +98,120 @@ router.post('/:id/approve', async (req, res) => {
   }
 });
 
+// Upload proxy file for manual proxy submission
+router.post('/upload-proxy-file', uploadProxyFile, handleUploadError, async (req, res) => {
+  try {
+    console.log('📤 Proxy file upload request received');
+    console.log('📎 File:', req.file);
+    console.log('📋 Body:', req.body);
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: 'No file uploaded'
+      });
+    }
+
+    const { user_id } = req.body;
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        error: 'User ID is required'
+      });
+    }
+
+    // Update user record with file information
+    const filePath = req.file.path.replace(/\\/g, '/'); // Normalize path for database
+    const fileName = req.file.originalname;
+    
+    await User.updateProxyFile(user_id, {
+      proxy_file_path: filePath,
+      proxy_file_name: fileName,
+      proxy_uploaded_at: new Date()
+    });
+
+    console.log('✅ Proxy file uploaded successfully:', {
+      userId: user_id,
+      fileName,
+      filePath
+    });
+
+    res.json({
+      success: true,
+      message: 'Proxy file uploaded successfully',
+      data: {
+        fileName,
+        filePath,
+        uploadedAt: new Date()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error uploading proxy file:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to upload proxy file'
+    });
+  }
+});
+
+// Download proxy file for a user
+router.get('/download-proxy-file/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    console.log('📥 Download proxy file request for user:', userId);
+
+    // Get user's file information
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    if (!user.proxy_file_path) {
+      return res.status(404).json({
+        success: false,
+        error: 'No proxy file found for this user'
+      });
+    }
+
+    // Check if file exists
+    const filePath = path.resolve(user.proxy_file_path);
+    if (!fs.existsSync(filePath)) {
+      console.error('❌ File not found:', filePath);
+      return res.status(404).json({
+        success: false,
+        error: 'Proxy file not found on server'
+      });
+    }
+
+    // Send file
+    const fileName = user.proxy_file_name || `proxy-${userId}.pdf`;
+    res.download(filePath, fileName, (err) => {
+      if (err) {
+        console.error('❌ Error downloading file:', err);
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            error: 'Failed to download file'
+          });
+        }
+      } else {
+        console.log('✅ File downloaded successfully:', fileName);
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error downloading proxy file:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to download proxy file'
+    });
+  }
+});
 
 // Get dashboard statistics
 router.get('/stats',  requireAdmin, async (req, res) => {
@@ -254,7 +391,12 @@ router.get('/users', async (req, res) => {
             max_votes_allowed: user.max_votes_allowed || 1,
             min_votes_required: user.min_votes_required || 1,
             vote_limit_set_by: user.vote_limit_set_by,
-            vote_limit_updated_at: user.vote_limit_updated_at
+            vote_limit_updated_at: user.vote_limit_updated_at,
+            // Proxy file fields
+            proxy_file_path: user.proxy_file_path,
+            proxy_file_name: user.proxy_file_name,
+            proxy_uploaded_at: user.proxy_uploaded_at,
+            proxy_vote_form: user.proxy_vote_form
         }));
 
         res.json({
@@ -302,41 +444,153 @@ router.get('/users', async (req, res) => {
 
 
 // Update user (admin only)
-router.put('/users/:id', [
-    body('name').optional().isLength({ min: 2 }).trim(),
-    body('email').optional().isEmail().normalizeEmail(),
-    body('role').optional().isIn(['admin', 'voter'])
-], async (req, res) => {
+router.put('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    
+    // Get admin info
+    const adminId = req.user?.id;
+    const adminName = req.user?.name || 'Unknown Admin';
+    
+    // Get user before update to track changes
+    const userQuery = `SELECT * FROM users WHERE id = @id`;
+    const userResult = await User.executeQuery(userQuery, { id });
+    const oldUser = userResult[0];
+    
+    const result = await User.updateUser(id, updateData);
+    
+    if (result.success) {
+      // Check if is_active was changed
+      if (updateData.is_active !== undefined && oldUser.is_active !== updateData.is_active) {
+        await logUserStatusChanged(
+          req, 
+          adminId, 
+          adminName, 
+          id, 
+          updateData.name || oldUser.name, 
+          updateData.is_active === 1 || updateData.is_active === true,
+          updateData.deactivation_reason || null
+        );
+      }
+      
+      // Log other changes
+      const changes = {};
+      Object.keys(updateData).forEach(key => {
+        if (oldUser[key] !== updateData[key] && key !== 'is_active') {
+          changes[key] = { old: oldUser[key], new: updateData[key] };
+        }
+      });
+      
+      if (Object.keys(changes).length > 0) {
+        await logUserUpdated(req, adminId, adminName, id, updateData.name || oldUser.name, changes);
+      }
+      
+      res.json({ success: true, message: 'User updated successfully' });
+    } else {
+      res.status(400).json({ success: false, message: result.message });
+    }
+  } catch (error) {
+    console.error('Error updating user:', error);
+    res.status(500).json({ success: false, message: 'Failed to update user' });
+  }
+});
+
+// Bulk update vote limits for all users (admin only - within super admin boundaries)
+// Using /users/vote-limits/bulk instead of /users/bulk-vote-limits to avoid route conflicts
+router.put('/users/vote-limits/bulk', async (req, res) => {
     try {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Invalid input data',
-                errors: errors.array() 
+        const { vote_weight, max_votes_allowed, min_votes_required } = req.body;
+
+        console.log('🔵 Bulk vote limits endpoint hit!', { vote_weight, max_votes_allowed, min_votes_required });
+
+        // Get super admin limits
+        const limitsQuery = `
+            SELECT min_individual_votes, max_individual_votes 
+            FROM vote_splitting_settings 
+            WHERE setting_name = 'proxy_vote_splitting'
+        `;
+
+        const limitsResult = await User.executeQuery(limitsQuery);
+        
+        let superAdminLimits = {
+            min_individual_votes: 1,
+            max_individual_votes: 3
+        };
+
+        if (limitsResult && limitsResult.length > 0) {
+            superAdminLimits = {
+                min_individual_votes: limitsResult[0].min_individual_votes,
+                max_individual_votes: limitsResult[0].max_individual_votes
+            };
+        }
+
+        // Validate against super admin boundaries
+        if (vote_weight && (vote_weight < 0.1 || vote_weight > 10)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Vote weight must be between 0.1 and 10'
             });
         }
 
-        const { id } = req.params;
-        const { name, avatar, isActive, role } = req.body;
+        if (max_votes_allowed && 
+            (max_votes_allowed < superAdminLimits.min_individual_votes || 
+             max_votes_allowed > superAdminLimits.max_individual_votes)) {
+            return res.status(400).json({
+                success: false,
+                message: `Max votes must be between ${superAdminLimits.min_individual_votes} and ${superAdminLimits.max_individual_votes} (set by super admin)`
+            });
+        }
 
-        await User.update(id, {
-            name,
-            avatar_url: avatar,
-            is_active: isActive,
-            email_verified: true
-        });
+        if (min_votes_required && 
+            (min_votes_required < superAdminLimits.min_individual_votes || 
+             min_votes_required > (max_votes_allowed || superAdminLimits.max_individual_votes))) {
+            return res.status(400).json({
+                success: false,
+                message: `Min votes must be between ${superAdminLimits.min_individual_votes} and max votes allowed`
+            });
+        }
+
+        // Get current user (admin) info from token
+        const adminId = req.user?.id || 'system';
+        const adminEmail = req.user?.email || 'admin';
+
+        // Update all users' vote limits (excluding super admins)
+        const updateQuery = `
+            UPDATE users 
+            SET 
+                vote_weight = ${vote_weight || 1.0},
+                max_votes_allowed = ${max_votes_allowed || 1},
+                min_votes_required = ${min_votes_required || 1},
+                vote_limit_set_by = '${adminEmail}',
+                vote_limit_updated_at = GETDATE()
+            WHERE role_id != 0
+        `;
+
+        await User.executeQuery(updateQuery);
+
+        // Get count of updated users
+        const countQuery = `SELECT COUNT(*) as count FROM users WHERE role_id != 0`;
+        const countResult = await User.executeQuery(countQuery);
+        const updatedCount = countResult && countResult.length > 0 ? countResult[0].count : 0;
 
         res.json({
             success: true,
-            message: 'User updated successfully'
+            message: `Vote limits updated for ${updatedCount} users`,
+            data: {
+                updated_count: updatedCount,
+                vote_weight: vote_weight || 1.0,
+                max_votes_allowed: max_votes_allowed || 1,
+                min_votes_required: min_votes_required || 1,
+                boundaries: superAdminLimits
+            }
         });
 
     } catch (error) {
-        console.error('Error updating user:', error);
+        console.error('Error updating bulk user vote limits:', error);
         res.status(500).json({ 
             success: false, 
-            message: 'Failed to update user' 
+            message: 'Failed to update bulk user vote limits: ' + error.message 
         });
     }
 });
@@ -502,7 +756,6 @@ router.get('/users/:id/vote-limits', async (req, res) => {
     }
 });
 
-
 // // Delete user (admin only)
 router.delete('/users/:id', async (req, res) => {
     try {
@@ -526,28 +779,40 @@ router.delete('/users/:id', async (req, res) => {
 
 
 // Employees
-// Get all employees for voting
+// Get all employees for voting with enhanced details
 router.get('/employees',  async (req, res) => {
   try {
-    const employees = await Employee.getAllForVoting();
+    const employees = await Employee.getAllWithDetails();
 
     const transformedEmployees = employees.map(emp => ({
       id: emp.id.toString(),
       name: emp.name,
       position: emp.position,
       department: emp.department,
-      avatar: emp.avatar,
+      avatar: emp.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(emp.name)}&background=059669&color=fff&size=128`,
       bio: emp.bio,
-      achievements: [],
+      email: emp.email,
+      phone_number: emp.phone_number,
+      achievements: emp.achievements || [],
       yearsOfService: emp.years_of_service,
-      skills: [],
+      years_of_service: emp.years_of_service, // Keep both for compatibility
+      skills: emp.skills || [],
       votes: emp.total_votes,
+      total_votes: emp.total_votes, // Keep both for compatibility
+      hire_date: emp.hire_date,
+      employee_id: emp.employee_id,
+      achievement_count: emp.achievement_count || 0,
+      skill_count: emp.skill_count || 0,
+      avg_skill_level: emp.avg_skill_level ? parseFloat(emp.avg_skill_level).toFixed(1) : '0.0',
+      performance_rating: calculatePerformanceRating(emp),
+      created_at: emp.created_at,
       updated_at: emp.updated_at
     }));
 
     res.json({
       success: true,
-      data: transformedEmployees
+      data: transformedEmployees,
+      count: transformedEmployees.length
     });
   } catch (error) {
     console.error('Error fetching employees:', error);
@@ -557,6 +822,32 @@ router.get('/employees',  async (req, res) => {
     });
   }
 });
+
+// Helper function to calculate performance rating
+function calculatePerformanceRating(emp) {
+  let score = 0;
+  
+  // Base score from years of service
+  score += Math.min(emp.years_of_service * 0.5, 2);
+  
+  // Achievement bonus
+  score += Math.min((emp.achievement_count || 0) * 0.3, 2);
+  
+  // Skills bonus
+  score += Math.min((emp.skill_count || 0) * 0.2, 1);
+  
+  // Average skill level bonus
+  if (emp.avg_skill_level) {
+    score += parseFloat(emp.avg_skill_level) * 0.5;
+  }
+  
+  // Voting popularity bonus
+  if (emp.total_votes > 0) {
+    score += Math.min(Math.log(emp.total_votes) * 0.3, 1);
+  }
+  
+  return Math.min(score, 5).toFixed(1);
+}
 
 //Add 
 router.post('/employees', async (req, res) => {

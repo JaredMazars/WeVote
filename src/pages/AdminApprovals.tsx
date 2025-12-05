@@ -1257,6 +1257,7 @@ const downloadTemplate = () => {
                       <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Department</th> */}
                       <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
                       <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Submitted</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Proxy File</th>
                       <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Actions</th>
                       <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Is Active</th>
                       <th className="px-4 py-3 text-left text-sm font-medium text-gray-600">Good Standing ID</th>
@@ -1276,6 +1277,21 @@ const downloadTemplate = () => {
                         <td className="px-4 py-3">{getStatusBadge(reg.registration_status ?? 'unknown')}</td>
                         <td className="px-4 py-3 text-gray-600 text-sm">
                           {reg.created_at ? new Date(reg.created_at).toLocaleDateString() : '-'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {(reg as any).proxy_file_name ? (
+                            <a
+                              href={`http://localhost:3001/api/proxy/download-proxy-form/${reg.id}/${(reg as any).proxy_file_path || (reg as any).proxy_file_name}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-700 text-sm flex items-center space-x-1"
+                            >
+                              <FileText className="h-4 w-4" />
+                              <span>Download</span>
+                            </a>
+                          ) : (
+                            <span className="text-gray-400 text-sm">No file</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <button

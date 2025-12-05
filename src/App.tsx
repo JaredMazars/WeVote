@@ -6,6 +6,7 @@ import Header from './components/Header';
 import ChatButton from './components/ChatButton';
 import VotingStatusBar from './components/VotingStatusBar';
 import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
 import Home from './pages/Home';
 import VotingCategories from './pages/VotingCategories';
 import EmployeeVoting from './pages/EmployeeVoting';
@@ -14,6 +15,7 @@ import EmployeeDetails from './pages/EmployeeDetails';
 import EventDetails from './pages/EventDetails';
 import AdminDashboard_2 from './pages/AdminDashboard_2';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import SuperAdminLogin from './pages/SuperAdminLogin';
 import EmployeeRegister from './pages/EmployeeRegister';
 import ProxyAppointmentForm from './pages/ProxyAppointmentForm';
 import ProxyFormManager from './pages/ProxyFormManager';
@@ -39,7 +41,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading } = useAuth(); 
   
   if (isLoading) {
     return (
@@ -48,14 +50,38 @@ const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       </div>
     );
   }
-  
-  return user && user.role === 'admin' ? <>{children}</> : <Navigate to="/home" replace />;
+
+  // Allow both role_id 0 (super admin) and role_id 1 (admin)
+  const roleId = user?.role_id;
+  const isAdmin = user && (roleId === 0 || roleId === 1 || user.role === 'admin');
+
+  console.log('🔐 AdminRoute Decision:', {
+    roleId,
+    isAdmin,
+    willRedirect: isAdmin,
+    redirectTo: !isAdmin ? '/home' : 'Access Granted'
+  });
+
+  return user && (user.role_id === 1 || user.role_id === 0) ? <>{children}</> : <Navigate to="/home" replace />;
 };
 
 const SuperAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, isLoading } = useAuth();
+
+  console.log('this is user super admin ttt', user);
+
+  console.log('🔍 SuperAdminRoute Check:', {
+    isLoading,
+    user,
+    hasUser: !!user,
+    role: user?.role,
+    role_id: user?.role_id,
+    roleIdType: typeof user?.role_id,
+    // roleIdParsed: user?.role_id ? parseInt(user.role_id) : null
+  });
   
   if (isLoading) {
+    console.log('⏳ SuperAdminRoute: Still loading...');
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-[#0072CE]"></div>
@@ -64,8 +90,16 @@ const SuperAdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) 
   }
   
   // Allow both role_id 0 (super admin) and role_id 1 (admin)
-  const roleId = user?.role_id ? parseInt(user.role_id) : null;
+  const roleId = user?.role_id;
   const isSuperAdmin = user && (roleId === 0 || roleId === 1 || user.role === 'admin');
+  
+  console.log('🔐 SuperAdminRoute Decision:', {
+    roleId,
+    isSuperAdmin,
+    willRedirect: !isSuperAdmin,
+    redirectTo: !isSuperAdmin ? '/home' : 'Access Granted'
+  });
+  
   return isSuperAdmin ? <>{children}</> : <Navigate to="/home" replace />;
 };
 
@@ -98,6 +132,9 @@ const AppContent: React.FC = () => {
       <div className={user ? "pt-4" : ""}>
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/home" replace /> : <Login />} />
+          <Route path="/forgot-password" element={user ? <Navigate to="/home" replace /> : <ForgotPassword />} />
+          <Route path="/super-admin-login" element={user ? <Navigate to="/super-admin" replace /> : <SuperAdminLogin />} />
+          <Route path="/admin-login" element={user ? <Navigate to="/admin" replace /> : <SuperAdminLogin />} />
           <Route path="/employee-register" element={<EmployeeRegister />} />
           <Route path="/home" element={<ProtectedRoute><Home /></ProtectedRoute>} />
           <Route path="/voting" element={<ProtectedRoute><VotingCategories /></ProtectedRoute>} />

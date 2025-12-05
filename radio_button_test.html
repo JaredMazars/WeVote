@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radio Button State Update Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; }
+        h2 { color: #666; margin-top: 30px; }
+        .test-section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        .broken { border-color: #f44336; background: #ffebee; }
+        .fixed { border-color: #4caf50; background: #e8f5e9; }
+        .radio-group { margin: 15px 0; }
+        .radio-option {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .radio-option:hover { background: #f9f9f9; }
+        input[type="radio"] { margin-right: 10px; }
+        .state-display {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .error { color: #f44336; font-weight: bold; }
+        .success { color: #4caf50; font-weight: bold; }
+        .label { font-weight: bold; color: #333; }
+        .explanation {
+            margin-top: 10px;
+            padding: 10px;
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Radio Button State Update Test</h1>
+        <p>This demonstrates the bug and the fix for the proxy appointment type radio buttons.</p>
+
+        <!-- BROKEN VERSION -->
+        <div class="test-section broken">
+            <h2>❌ Broken Version (Multiple State Updates)</h2>
+            <p><strong>Problem:</strong> Multiple sequential setState calls cause race conditions</p>
+            
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input type="radio" id="broken-disc" name="broken" value="discretional" checked>
+                    <label for="broken-disc">
+                        <strong>Discretional</strong>
+                        <br><small>Proxy can vote for anyone</small>
+                    </label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="broken-inst" name="broken" value="instructional">
+                    <label for="broken-inst">
+                        <strong>Instructional</strong>
+                        <br><small>Must follow instructions</small>
+                    </label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="broken-mixed" name="broken" value="mixed">
+                    <label for="broken-mixed">
+                        <strong>Mixed</strong>
+                        <br><small>Split between discretional and instructional</small>
+                    </label>
+                </div>
+            </div>
+
+            <div class="state-display">
+                <div class="label">Current State:</div>
+                <div id="broken-state">appointmentType: 'discretional'</div>
+                <div id="broken-update-count">State Updates: 0</div>
+            </div>
+
+            <div class="explanation">
+                <strong>What happens:</strong>
+                <ul>
+                    <li>Click triggers 3 separate setState calls</li>
+                    <li>Each call reads from OLD state</li>
+                    <li>Last update overwrites the first two</li>
+                    <li>appointmentType doesn't change! 🐛</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- FIXED VERSION -->
+        <div class="test-section fixed">
+            <h2>✅ Fixed Version (Single Atomic Update)</h2>
+            <p><strong>Solution:</strong> All fields updated in one setState call</p>
+            
+            <div class="radio-group">
+                <div class="radio-option">
+                    <input type="radio" id="fixed-disc" name="fixed" value="discretional" checked>
+                    <label for="fixed-disc">
+                        <strong>Discretional</strong>
+                        <br><small>Proxy can vote for anyone</small>
+                    </label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="fixed-inst" name="fixed" value="instructional">
+                    <label for="fixed-inst">
+                        <strong>Instructional</strong>
+                        <br><small>Must follow instructions</small>
+                    </label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="fixed-mixed" name="fixed" value="mixed">
+                    <label for="fixed-mixed">
+                        <strong>Mixed</strong>
+                        <br><small>Split between discretional and instructional</small>
+                    </label>
+                </div>
+            </div>
+
+            <div class="state-display">
+                <div class="label">Current State:</div>
+                <div id="fixed-state">appointmentType: 'discretional'</div>
+                <div id="fixed-update-count">State Updates: 0</div>
+            </div>
+
+            <div class="explanation">
+                <strong>What happens:</strong>
+                <ul>
+                    <li>Click triggers 1 setState call</li>
+                    <li>All fields updated atomically</li>
+                    <li>No race conditions</li>
+                    <li>Works perfectly! ✨</li>
+                </ul>
+            </div>
+        </div>
+
+        <div style="margin-top: 30px; padding: 20px; background: #e3f2fd; border-radius: 8px;">
+            <h3>📚 Key Takeaway</h3>
+            <p><strong>When multiple fields need to change together, update them in a SINGLE setState call!</strong></p>
+            <pre style="background: white; padding: 15px; border-radius: 5px; overflow-x: auto;">
+// ❌ BAD: Multiple updates
+setState1(value1);
+setState2(value2);
+setState3(value3);
+
+// ✅ GOOD: Single atomic update
+setState({
+  field1: value1,
+  field2: value2,
+  field3: value3
+});
+            </pre>
+        </div>
+    </div>
+
+    <script>
+        // Simulate BROKEN version (multiple state updates)
+        let brokenState = {
+            appointmentType: 'discretional',
+            discretionalVotes: 10,
+            instructionalVotes: 0
+        };
+        let brokenUpdateCount = 0;
+
+        document.querySelectorAll('input[name="broken"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const value = e.target.value;
+                brokenUpdateCount = 0;
+
+                // Simulate multiple setState calls (this is the BUG!)
+                // Update 1: Set appointmentType
+                setTimeout(() => {
+                    brokenState = { ...brokenState, appointmentType: value };
+                    brokenUpdateCount++;
+                    updateBrokenDisplay();
+                }, 10);
+
+                // Update 2: Set discretionalVotes (overwrites appointmentType!)
+                setTimeout(() => {
+                    brokenState = { 
+                        ...brokenState, 
+                        discretionalVotes: value === 'discretional' ? 10 : 0 
+                    };
+                    brokenUpdateCount++;
+                    updateBrokenDisplay();
+                }, 20);
+
+                // Update 3: Set instructionalVotes (overwrites everything!)
+                setTimeout(() => {
+                    brokenState = { 
+                        appointmentType: 'discretional', // BUG: Resets to old value!
+                        discretionalVotes: 0, 
+                        instructionalVotes: value === 'instructional' ? 10 : 0 
+                    };
+                    brokenUpdateCount++;
+                    updateBrokenDisplay();
+                }, 30);
+            });
+        });
+
+        function updateBrokenDisplay() {
+            const isCorrect = document.querySelector('input[name="broken"]:checked').value === brokenState.appointmentType;
+            document.getElementById('broken-state').innerHTML = `
+                <span class="${isCorrect ? 'success' : 'error'}">
+                    appointmentType: '${brokenState.appointmentType}'
+                </span>
+                <br>discretionalVotes: ${brokenState.discretionalVotes}
+                <br>instructionalVotes: ${brokenState.instructionalVotes}
+                ${!isCorrect ? '<br><br><span class="error">⚠️ BUG: Radio selection doesn\'t match state!</span>' : ''}
+            `;
+            document.getElementById('broken-update-count').textContent = `State Updates: ${brokenUpdateCount}`;
+        }
+
+        // Simulate FIXED version (single atomic update)
+        let fixedState = {
+            appointmentType: 'discretional',
+            discretionalVotes: 10,
+            instructionalVotes: 0
+        };
+        let fixedUpdateCount = 0;
+
+        document.querySelectorAll('input[name="fixed"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                const value = e.target.value;
+                fixedUpdateCount++;
+
+                // Single atomic update - all fields changed at once!
+                fixedState = {
+                    appointmentType: value,
+                    discretionalVotes: value === 'discretional' ? 10 : (value === 'mixed' ? 5 : 0),
+                    instructionalVotes: value === 'instructional' ? 10 : (value === 'mixed' ? 5 : 0)
+                };
+
+                updateFixedDisplay();
+            });
+        });
+
+        function updateFixedDisplay() {
+            const isCorrect = document.querySelector('input[name="fixed"]:checked').value === fixedState.appointmentType;
+            document.getElementById('fixed-state').innerHTML = `
+                <span class="${isCorrect ? 'success' : 'error'}">
+                    appointmentType: '${fixedState.appointmentType}'
+                </span>
+                <br>discretionalVotes: ${fixedState.discretionalVotes}
+                <br>instructionalVotes: ${fixedState.instructionalVotes}
+                ${isCorrect ? '<br><br><span class="success">✅ Perfect! State matches selection!</span>' : ''}
+            `;
+            document.getElementById('fixed-update-count').textContent = `State Updates: ${fixedUpdateCount}`;
+        }
+
+        // Initialize displays
+        updateBrokenDisplay();
+        updateFixedDisplay();
+    </script>
+</body>
+</html>

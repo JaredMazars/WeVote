@@ -5,6 +5,12 @@ import Vote from '../models/Vote.js';
 import auth from '../middleware/auth.js';
 import emailService from '../services/emailService.js';
 import database from "../config/database.js";
+import { 
+  logVoteCast, 
+  logVoteRemoved, 
+  logVoteEdited, 
+  logSplitVoteCast 
+} from '../middleware/auditLogger.js';
 
 // function decodeJWT(token) {
 //   try {
@@ -538,6 +544,21 @@ router.delete('/:id/vote', async (req, res) => {
     };
 
     const removedCount = await Vote.removeVote(removeData);
+    
+    // Get employee info for logging
+    const employeeResult = await database.query(
+      `SELECT name FROM employees WHERE id = ${id}`
+    );
+    const employeeName = employeeResult.recordset[0]?.name || 'Unknown Employee';
+    
+    // Get user info for logging
+    const userResult = await database.query(
+      `SELECT name FROM users WHERE id = '${myId}'`
+    );
+    const userName = userResult.recordset[0]?.name || 'Unknown User';
+    
+    // Log vote removal
+    await logVoteRemoved(req, myId, userName, id, employeeName, removedCount);
 
     res.json({ 
       success: true, 
@@ -620,7 +641,7 @@ router.put('/:employeeId/vote/override', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid employee ID' });
   }
 
-  // Extract token
+  // Extract token  if (userLimitsResult.length === 0) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) {
     console.warn('⚠️ No token provided');
@@ -638,6 +659,40 @@ router.put('/:employeeId/vote/override', async (req, res) => {
   console.log(`✅ Authenticated voterId: ${voterId}`);
 
   try {
+    // Check vote limits before allowing the vote
+    console.log('🔍 Checking vote limits...');
+    const userLimitsResult = await database.query(
+      `SELECT ISNULL(max_votes_allowed, 1) as max_votes_allowed, name FROM users WHERE id = ${voterId}`
+    );
+    
+    if (userLimitsResult.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const maxVotesAllowed = userLimitsResult[0].max_votes_allowed;
+    const userName = userLimitsResult[0].name;
+
+    // Count current valid votes (excluding the current employee if already voted)
+    const currentVotesResult = await database.query(
+      `SELECT COUNT(*) as vote_count 
+       FROM votes 
+       WHERE voter_id = ${voterId} 
+         AND valid_vote = 1 
+         AND (proxy_id IS NULL OR proxy_id = 0)
+         AND employee_id != ${employeeId}`
+    );
+    
+    const currentVoteCount = currentVotesResult[0]?.vote_count || 0;
+    console.log(`📊 Current votes: ${currentVoteCount}/${maxVotesAllowed} (excluding this employee)`);
+
+    if (currentVoteCount >= maxVotesAllowed) {
+      console.log(`❌ Vote limit exceeded for user ${voterId}`);
+      return res.status(400).json({ 
+        success: false, 
+        message: `Vote limit exceeded. You have used all ${maxVotesAllowed} of your available votes. Remove a vote first or contact an admin to increase your vote limit.`
+      });
+    }
+
     // 1. Invalidate all previous votes for this voter and employee
     console.log(`🗂️ Setting valid_vote = 0 for voterId ${voterId}`);
     const updateResult = await database.query(
@@ -664,6 +719,15 @@ router.put('/:employeeId/vote/override', async (req, res) => {
        )`
     );
     console.log('✅ New vote recorded');
+    
+    // Get employee info for logging
+    const employeeResult = await database.query(
+      `SELECT name FROM employees WHERE id = ${employeeId}`
+    );
+    const employeeName = employeeResult.recordset[0]?.name || 'Unknown Employee';
+    
+    // Log the vote action to audit
+    await logVoteCast(req, voterId, userName, employeeId, employeeName, false);
 
     res.json({
       success: true,
@@ -1152,6 +1216,22 @@ router.post('/split-vote', async (req, res) => {
           `UPDATE employees SET total_votes = total_votes + ${successCount}, updated_at = GETDATE() WHERE id = ${target_id}`
         );
         console.log(`📊 Updated vote count for employee ID: ${target_id} (+${successCount})`);
+        
+        // Get employee info for logging
+        const employeeResult = await database.query(
+          `SELECT name FROM employees WHERE id = ${target_id}`
+        );
+        const employeeName = employeeResult[0]?.name || 'Unknown Employee';
+        
+        // Get proxy user name
+        const proxyNameResult = await database.query(
+          `SELECT name FROM users WHERE id = ${proxy_id}`
+        );
+        const proxyName = proxyNameResult[0]?.name || 'Unknown User';
+        
+        // Log split vote action
+        await logSplitVoteCast(req, proxy_id, proxyName, target_id, employeeName, successCount);
+        
       } else {
         console.log(`📊 Updated vote count for resolution ID: ${target_id} (+${successCount})`);
       }

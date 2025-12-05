@@ -1,0 +1,78 @@
+// Quick test to get a login token and test the audit logs API
+console.log('🚀 Testing audit logs API with fresh token...');
+
+async function testAuditLogsAPI() {
+  try {
+    // Step 1: Login to get a fresh token
+    console.log('🔐 Logging in...');
+    const loginResponse = await fetch('http://localhost:3001/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: 'jaredmoodley9@gmail.com', // User ID 171 from our data
+        password: 'password123'
+      })
+    });
+
+    const loginResult = await loginResponse.json();
+    console.log('🎫 Login response:', loginResult);
+
+    if (!loginResult.success) {
+      // Try alternative login credentials
+      console.log('🔄 Trying alternative credentials...');
+      const altLoginResponse = await fetch('http://localhost:3001/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: 'admin@company.com',
+          password: 'password123'
+        })
+      });
+      
+      const altLoginResult = await altLoginResponse.json();
+      console.log('🎫 Alternative login response:', altLoginResult);
+      
+      if (altLoginResult.success && altLoginResult.token) {
+        console.log('✅ Using alternative login token');
+        loginResult.token = altLoginResult.token;
+        loginResult.success = true;
+      }
+    }
+
+    if (loginResult.success && loginResult.token) {
+      console.log('✅ Login successful, testing audit logs...');
+      
+      // Step 2: Test the audit logs API
+      const auditResponse = await fetch('http://localhost:3001/api/audit-logs', {
+        headers: {
+          'Authorization': `Bearer ${loginResult.token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('📡 Audit API response status:', auditResponse.status);
+      
+      const auditResult = await auditResponse.json();
+      console.log('📊 Audit logs API response:', auditResult);
+
+      if (auditResult.success && auditResult.data) {
+        console.log(`🎉 SUCCESS! Found ${auditResult.data.length} audit logs`);
+        auditResult.data.slice(0, 3).forEach((log, index) => {
+          console.log(`   ${index + 1}. [${log.action_category}] ${log.action_type} - ${log.description}`);
+        });
+      } else {
+        console.error('❌ No data in audit response:', auditResult);
+      }
+    } else {
+      console.error('❌ Login failed:', loginResult);
+    }
+  } catch (error) {
+    console.error('💥 Test error:', error);
+  }
+}
+
+testAuditLogsAPI();

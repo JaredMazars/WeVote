@@ -3,6 +3,78 @@ import database from '../config/database.js';
 
 const router = express.Router();
 
+// Get voting status by membership number
+router.get('/status/by-member/:memberNumber', async (req, res) => {
+  try {
+    const { memberNumber } = req.params;
+
+    console.log('Fetching voting status for member number:', memberNumber);
+
+    // First, find the user by membership number
+    const userLookupQuery = `
+      SELECT 
+        id,
+        name,
+        email,
+        member_number,
+        ISNULL(vote_weight, 1.0) as vote_weight,
+        ISNULL(max_votes_allowed, 1) as max_votes_allowed,
+        ISNULL(min_votes_required, 1) as min_votes_required
+      FROM users
+      WHERE member_number = '${memberNumber}'
+    `;
+    
+    const users = await database.query(userLookupQuery);
+    
+    if (!users || users.length === 0) {
+      console.log('User not found with member number:', memberNumber);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found with this membership number'
+      });
+    }
+
+    const user = users[0];
+    const userIdInt = user.id;
+
+    // Get user's personal votes cast
+    const personalVotesQuery = `
+      SELECT COUNT(*) as count
+      FROM votes v
+      WHERE v.voter_id = ${userIdInt}
+        AND (v.proxy_id IS NULL OR v.proxy_id = 0)
+    `;
+
+    const personalVotesResult = await database.query(personalVotesQuery);
+    const personalVotesCast = personalVotesResult[0]?.count || 0;
+
+    // Calculate available votes
+    const totalPersonalVotes = user.max_votes_allowed || 1;
+    const personalVotesRemaining = Math.max(0, totalPersonalVotes - personalVotesCast);
+
+    // Return simplified response with just vote counts
+    return res.json({
+      success: true,
+      data: {
+        userId: user.id,
+        userName: user.name,
+        memberNumber: user.member_number,
+        personalVotesTotal: totalPersonalVotes,
+        personalVotesCast: personalVotesCast,
+        personalVotesRemaining: personalVotesRemaining
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching voting status by member number:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch voting status',
+      error: error.message
+    });
+  }
+});
+
 // Get voting status for a user
 router.get('/status/:userId', async (req, res) => {
   try {

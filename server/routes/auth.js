@@ -6,6 +6,12 @@ import { body, validationResult } from 'express-validator';
 import rateLimit from 'express-rate-limit';
 import emailService from '../services/emailService.js';
 import auth from '../middleware/auth.js';
+import { 
+  logLogin, 
+  logLogout, 
+  logPasswordChange, 
+  logForgotPassword 
+} from '../middleware/auditLogger.js';
 
 const router = express.Router();
 
@@ -14,6 +20,248 @@ const authLimiter = rateLimit({
   // windowMs: 15 * 60 * 1000,
   // max: 5,
   // message: { error: 'Too many authentication attempts, please try again later.' }
+});
+
+// Super Admin Login route
+router.post('/super-admin-login', authLimiter, [
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 6 })
+], async (req, res) => {
+  try {
+    console.log('🔐 Super Admin login attempt started for:', req.body.email);
+    
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid input data',
+        errors: errors.array()
+      });
+    }
+
+    const { email, password } = req.body;
+    console.log('🔍 Looking up super admin user:', email);
+    const user = await User.findByEmail(email);
+
+    if (!user) {
+      console.log('❌ User not found for email:', email);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Check if user is super admin (role_id = 0)
+    if (user.role_id !== 0 && user.role_name?.toLowerCase() !== 'super admin') {
+      console.log('❌ User is not a super admin:', email, 'Role:', user.role_id, user.role_name);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Super admin privileges required.'
+      });
+    }
+
+    console.log('✅ Super Admin user found:', {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role_id: user.role_id,
+      role_name: user.role_name,
+      is_active: user.is_active
+    });
+
+    console.log('🔒 Verifying password...');
+    const isValidPassword = await User.verifyPassword(password, user.password_hash);
+    console.log('🔒 Password verification result:', isValidPassword);
+    
+    if (!isValidPassword) {
+      console.log('❌ Invalid password for super admin:', email);
+      
+      // Log failed login attempt
+      await logLogin(req, user.id, user.name, false);
+      
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    await User.updateLastLogin(user.id);
+
+    // Log the super admin login event
+    await User.logLogin({
+      userId: user.id,
+      email: user.email,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    // Log successful login to audit
+    await logLogin(req, user.id, user.name, true);
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        userId: user.id,
+        email: user.email,
+        role: user.role_name,
+        role_id: user.role_id,
+        name: user.name,
+        isSuperAdmin: true
+      },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+    );
+
+    const userData = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      surname: user.surname,
+      membership_number: user.member_number,
+      member_number: user.member_number,
+      id_number: user.id_number,
+      avatar: user.avatar_url,
+      role: user.role_name?.toLowerCase() || 'super admin',
+      role_id: user.role_id
+    };
+
+    console.log('✅ Super Admin login successful:', email);
+    res.json({
+      success: true,
+      message: 'Super Admin login successful',
+      token,
+      user: userData
+    });
+
+  } catch (error) {
+    console.error('Super Admin login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Admin Login route
+router.post('/admin-login', authLimiter, [
+  body('email').isEmail().normalizeEmail(),
+  body('password').isLength({ min: 6 })
+], async (req, res) => {
+  try {
+    console.log('🔐 Admin login attempt started for:', req.body.email);
+    
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid input data',
+        errors: errors.array()
+      });
+    }
+
+    const { email, password } = req.body;
+    console.log('🔍 Looking up admin user:', email);
+    const user = await User.findByEmail(email);
+
+    if (!user) {
+      console.log('❌ User not found for email:', email);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    // Check if user is admin (role_id = 0 or 1)
+    if (user.role_id !== 0 && user.role_id !== 1) {
+      console.log('❌ User is not an admin:', email, 'Role:', user.role_id, user.role_name);
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin privileges required.'
+      });
+    }
+
+    console.log('✅ Admin user found:', {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role_id: user.role_id,
+      role_name: user.role_name,
+      is_active: user.is_active
+    });
+
+    console.log('🔒 Verifying password...');
+    const isValidPassword = await User.verifyPassword(password, user.password_hash);
+    console.log('🔒 Password verification result:', isValidPassword);
+    
+    if (!isValidPassword) {
+      console.log('❌ Invalid password for admin:', email);
+      
+      // Log failed login attempt
+      await logLogin(req, user.id, user.name, false);
+      
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials'
+      });
+    }
+
+    await User.updateLastLogin(user.id);
+
+    // Log the admin login event
+    await User.logLogin({
+      userId: user.id,
+      email: user.email,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+    
+    // Log successful login to audit
+    await logLogin(req, user.id, user.name, true);
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        userId: user.id,
+        email: user.email,
+        role: user.role_name,
+        role_id: user.role_id,
+        name: user.name,
+        isAdmin: true
+      },
+      process.env.JWT_SECRET || 'your-secret-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+    );
+
+    const userData = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      surname: user.surname,
+      membership_number: user.member_number,
+      member_number: user.member_number,
+      id_number: user.id_number,
+      avatar: user.avatar_url,
+      role: user.role_name?.toLowerCase() || 'admin',
+      role_id: user.role_id
+    };
+
+    console.log('✅ Admin login successful:', email);
+    res.json({
+      success: true,
+      message: 'Admin login successful',
+      token,
+      user: userData
+    });
+
+  } catch (error) {
+    console.error('Admin login error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
 });
 
 // Login route
@@ -51,6 +299,7 @@ router.post('/login', authLimiter, [
       email: user.email,
       name: user.name,
       role_name: user.role_name,
+      role_id: user.role_id,
       is_active: user.is_active,
       password_hash_length: user.password_hash ? user.password_hash.length : 0
     });
@@ -61,6 +310,10 @@ router.post('/login', authLimiter, [
     
     if (!isValidPassword) {
       console.log('❌ Invalid password for user:', email);
+      
+      // Log failed login attempt
+      await logLogin(req, user.id, user.name, false);
+      
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -76,6 +329,9 @@ router.post('/login', authLimiter, [
       ipAddress: req.ip,
       userAgent: req.headers['user-agent']
     });
+    
+    // Log successful login to audit
+    await logLogin(req, user.id, user.name, true);
 
     const token = jwt.sign(
       {
@@ -96,9 +352,21 @@ router.post('/login', authLimiter, [
       surname: user.surname,
       membership_number: user.member_number,
       member_number: user.member_number,
+      id_number: user.id_number,
       avatar: user.avatar_url,
-      role: user.role_name?.toLowerCase() || 'voter'
+      role: user.role_name?.toLowerCase() || 'voter',
+      role_id: user.role_id,
+      email_verified: user.email_verified,
+      is_temp_password: user.is_temp_password,
+      needs_password_change: user.needs_password_change,
+      proxy_vote_form: user.proxy_vote_form,
+      proxy_file_name: user.proxy_file_name,
+      proxy_file_path: user.proxy_file_path,
+      proxy_uploaded_at: user.proxy_uploaded_at
     };
+
+    console.log('✅ Login successful - userData.proxy_vote_form:', userData.proxy_vote_form);
+    console.log('📤 Sending userData:', JSON.stringify(userData, null, 2));
 
     res.json({
       success: true,
@@ -196,7 +464,7 @@ router.post('/register', authLimiter, [
       });
     }
 
-    const { email, name, avatar_url, role } = req.body;
+    const { email, name, avatar_url, role, proxy_method } = req.body;
     
     // Generate a secure random password
     const password = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
@@ -209,13 +477,14 @@ router.post('/register', authLimiter, [
       });
     }
 
-    console.log('Creating user with data:', { email, name, avatar_url });
+    console.log('Creating user with data:', { email, name, avatar_url, proxy_method });
     const userId = await User.create({
       email,
       password,
       name,
       avatar_url: avatar_url || null,
-      role_id: 1
+      role_id: 1,
+      proxy_method: proxy_method || 'digital'
     });
     
     console.log('User created with ID:', userId);
@@ -236,15 +505,15 @@ router.post('/register', authLimiter, [
       // Continue with registration even if email fails
     }
 
-    // // Get the created user for token generation
-    // const user = await User.findById(userId);
+    // Get the created user for token generation
+    const user = await User.findById(userId);
     
-    // if (!user) {
-    //   return res.status(500).json({
-    //     success: false,
-    //     message: 'New User Creation Failed'
-    //   });
-    // }
+    if (!user) {
+      return res.status(500).json({
+        success: false,
+        message: 'New User Creation Failed'
+      });
+    }
     
     // Generate JWT token for immediate login
     const token = jwt.sign(
@@ -264,8 +533,11 @@ router.post('/register', authLimiter, [
       email: user.email,
       name: user.name,
       avatar: user.avatar_url,
+      surname: user.surname,
       member_number: user.member_number,
-      role: user.role_name?.toLowerCase() || 'voter'
+      id_number: user.id_number,
+      role: user.role_name?.toLowerCase() || 'voter',
+      proxy_method: proxy_method || 'digital'
     };
 
     res.status(201).json({
@@ -327,7 +599,8 @@ router.get('/verify', async (req, res) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
     const user = await User.findById(decoded.userId || decoded.id);
-
+    console.log('🔍 Token verification user: ', user);
+    
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -341,8 +614,18 @@ router.get('/verify', async (req, res) => {
       name: user.name,
       avatar: user.avatar_url,
       member_number: user.member_number,
-      role: user.role_name?.toLowerCase() || 'voter'
+      id_number: user.id_number,
+      surname: user.surname,
+      role: user.role_name?.toLowerCase() || 'voter',
+      role_id: user.role_id  // ✅ ADD THIS - Critical for SuperAdminRoute check
     };
+
+    console.log('🔐 Token verification - User data:', {
+      id: userData.id,
+      email: userData.email,
+      role: userData.role,
+      role_id: userData.role_id
+    }); 
 
     res.json({
       success: true,
@@ -438,6 +721,8 @@ router.post('/microsoft', async (req, res) => {
           role: existingUser.role_name?.toLowerCase() || 'voter',
           member_number: existingUser.member_number,
           avatar: existingUser.avatar_url,
+          id_number: existingUser.id_number,
+          surname: existingUser.surname,
         }
       });
       
@@ -507,7 +792,13 @@ router.post('/update-password', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
     }
 
+    // Get user info before update
+    const user = await User.findById(userId);
+
     await User.updatePassword(userId, password);
+    
+    // Log password change
+    await logPasswordChange(req, userId, user?.name || 'User', user?.needs_password_change || false);
 
     res.json({ success: true, message: 'Password updated successfully' });
   } catch (error) {
@@ -528,7 +819,14 @@ router.post('/forgot-password', async (req, res) => {
     const user = await User.findByEmail(email);
 
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      // Log failed attempt
+      await logForgotPassword(req, email, false);
+      
+      // Don't reveal if user exists or not for security
+      return res.json({ 
+        success: true, 
+        message: 'If an account exists with this email, a password reset link will be sent.'
+      });
     }
 
     // Generate random temporary password
@@ -540,19 +838,26 @@ router.post('/forgot-password', async (req, res) => {
     // Update user with temp password
     await User.setTempPassword(user.id, tempPassword);
 
-    // Send email (implement your email service here)
-    // await sendPasswordResetEmail(email, user.name, tempPassword);
+    // Send password reset email
+    const emailResult = await emailService.sendPasswordResetEmail(email, user.name || 'User', tempPassword);
     
-    console.log(`Temp password for ${email}: ${tempPassword}`); // Remove in production
+    if (emailResult.success) {
+      console.log(`✅ Password reset email sent to ${email}`);
+      
+      // Log successful password reset request
+      await logForgotPassword(req, email, true);
+    } else {
+      console.error(`❌ Failed to send password reset email to ${email}:`, emailResult.error);
+    }
 
     res.json({ 
       success: true, 
-      message: 'Temporary password sent to your email'
+      message: 'A temporary password has been sent to your email address.'
     });
 
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ success: false, message: 'Failed to process request' });
+    res.status(500).json({ success: false, message: 'Failed to process request. Please try again later.' });
   }
 });
 

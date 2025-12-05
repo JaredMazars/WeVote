@@ -16,7 +16,8 @@ static async create(userData) {
     good_standing_id_number,
     proxy_vote_form,
     date_of_birth, // varchar(10)
-    phone // varchar(10)
+    phone, // varchar(10)
+    proxy_method = 'digital' // Default to digital if not specified
   } = userData;
 
   const password_hash = await bcrypt.hash(password, 12);
@@ -25,7 +26,7 @@ static async create(userData) {
     INSERT INTO users (
       title, email, password_hash, initials, id_number, name, surname,
       avatar_url, role_id, is_active, email_verified, member_number,
-      proxy_vote_form, date_of_birth, phone
+      proxy_vote_form, date_of_birth, phone, proxy_method
     )
     OUTPUT INSERTED.id
     VALUES (
@@ -38,12 +39,13 @@ static async create(userData) {
       '${lastname}',
       '${avatar_url}',
       ${role_id},
-      1,
+      0,
       0,
       '${good_standing_id_number || ''}',
       '${proxy_vote_form || ''}',
       '${date_of_birth || ''}', -- ✅ Treat as string
-      '${phone || ''}'          -- ✅ Treat as string
+      '${phone || ''}',          -- ✅ Treat as string
+      '${proxy_method}'          -- Add proxy method
     )
   `;
 
@@ -65,6 +67,8 @@ static async create(userData) {
              u.role_id, u.is_active, u.email_verified, u.last_login,
              u.created_at, u.updated_at, u.microsoft_id, u.provider,
              u.phone_number, u.created_by, u.updated_by, u.member_number,
+             u.is_temp_password, u.needs_password_change, u.proxy_vote_form,
+             u.proxy_file_name, u.proxy_file_path, u.proxy_uploaded_at,
              r.name as role_name, r.description as role_description, r.permissions
       FROM users u
       LEFT JOIN roles r ON u.role_id = r.id
@@ -78,8 +82,9 @@ static async create(userData) {
 
   static async findById(id) {
     const sql = `
-      SELECT u.id, u.email, u.name, u.avatar_url, u.is_active,
-             u.email_verified, u.last_login, u.created_at, u.member_number,
+      SELECT u.id, u.email, u.name, u.surname, u.id_number, u.avatar_url, u.is_active,
+             u.email_verified, u.last_login, u.created_at, u.member_number, u.role_id,
+             u.proxy_vote_form,
              r.name as role_name, r.description as role_description
       FROM users u
       LEFT JOIN roles r ON u.role_id = r.id
@@ -109,7 +114,9 @@ static async create(userData) {
     const sql = `
       SELECT u.id, u.email, u.name, u.avatar_url, u.is_active,
              u.email_verified, u.last_login, u.created_at,
-             r.name as role_name, is_active, good_standing
+             u.proxy_file_path, u.proxy_file_name, u.proxy_uploaded_at,
+             u.proxy_vote_form,
+             r.name as role_name, u.good_standing
       FROM users u
       LEFT JOIN roles r ON u.role_id = r.id
       ORDER BY u.created_at DESC
@@ -125,7 +132,11 @@ static async create(userData) {
   
   const sql = `
     UPDATE users
-    SET is_active = 1, password_hash = '${passwordHash}', updated_at = GETDATE()
+    SET is_active = 1, 
+        password_hash = '${passwordHash}', 
+        is_temp_password = 1,
+        needs_password_change = 1,
+        updated_at = GETDATE()
     WHERE id = ${userId}
   `;
 
@@ -178,8 +189,25 @@ static async approveUserGoodStandingById(userId) {
     const password_hash = await bcrypt.hash(newPassword, 12);
     const sql = `
       UPDATE users
-      SET password_hash = '${password_hash}', updated_at = GETDATE()
+      SET password_hash = '${password_hash}', 
+          is_temp_password = 0,
+          needs_password_change = 0,
+          updated_at = GETDATE()
       WHERE id = ${id}
+    `;
+    await database.query(sql);
+    return true;
+  }
+
+  static async setTempPassword(userId, tempPassword) {
+    const password_hash = await bcrypt.hash(tempPassword, 12);
+    const sql = `
+      UPDATE users
+      SET password_hash = '${password_hash}', 
+          is_temp_password = 1,
+          needs_password_change = 1,
+          updated_at = GETDATE()
+      WHERE id = ${userId}
     `;
     await database.query(sql);
     return true;
@@ -187,6 +215,33 @@ static async approveUserGoodStandingById(userId) {
 
   static async softDelete(id) {
     const sql = `UPDATE users SET is_active = 0 WHERE id = ${id}`;
+    await database.query(sql);
+    return true;
+  }
+
+  // Update proxy file information for a user
+  static async updateProxyFile(userId, fileData) {
+    const { proxy_file_path, proxy_file_name, proxy_uploaded_at } = fileData;
+    const sql = `
+      UPDATE users 
+      SET proxy_file_path = '${proxy_file_path}',
+          proxy_file_name = '${proxy_file_name}',
+          proxy_uploaded_at = '${proxy_uploaded_at.toISOString()}',
+          updated_at = GETDATE()
+      WHERE id = ${userId}
+    `;
+    await database.query(sql);
+    return true;
+  }
+
+  // Update proxy method for a user
+  static async updateProxyMethod(userId, proxyMethod) {
+    const sql = `
+      UPDATE users 
+      SET proxy_method = '${proxyMethod}',
+          updated_at = GETDATE()
+      WHERE id = ${userId}
+    `;
     await database.query(sql);
     return true;
   }

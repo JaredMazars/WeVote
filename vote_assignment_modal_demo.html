@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vote Assignment Modal Demo</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .demo-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+        }
+
+        .demo-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .demo-header h1 {
+            color: #2d3748;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .demo-header p {
+            color: #718096;
+            font-size: 1.1rem;
+        }
+
+        .users-table {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-bottom: 40px;
+        }
+
+        .table-header {
+            background: #f7fafc;
+            padding: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .table-header h3 {
+            color: #2d3748;
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+        }
+
+        .table-content {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 16px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        th {
+            background: #f7fafc;
+            color: #4a5568;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .user-details h4 {
+            color: #2d3748;
+            font-size: 1rem;
+            margin-bottom: 2px;
+        }
+
+        .user-details p {
+            color: #718096;
+            font-size: 0.9rem;
+        }
+
+        .role-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .role-admin {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .role-voter {
+            background: #bee3f8;
+            color: #2b77cb;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .status-active {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+
+        .action-btn {
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .vote-limits-btn {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+
+        .vote-limits-btn:hover {
+            background: #9ae6b4;
+            transform: translateY(-2px);
+        }
+
+        .edit-btn {
+            background: #bee3f8;
+            color: #2b77cb;
+        }
+
+        .edit-btn:hover {
+            background: #90cdf4;
+            transform: translateY(-2px);
+        }
+
+        .delete-btn {
+            background: #fed7d7;
+            color: #c53030;
+        }
+
+        .delete-btn:hover {
+            background: #feb2b2;
+            transform: translateY(-2px);
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+        }
+
+        .modal {
+            background: white;
+            border-radius: 24px;
+            padding: 40px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.2);
+            transform: scale(1);
+            animation: modalAppear 0.3s ease-out;
+        }
+
+        @keyframes modalAppear {
+            from {
+                opacity: 0;
+                transform: scale(0.9) translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .modal-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .modal-icon {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+            color: white;
+            font-size: 28px;
+        }
+
+        .modal h3 {
+            color: #2d3748;
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+
+        .modal-subtitle {
+            color: #718096;
+            margin-bottom: 4px;
+        }
+
+        .user-email {
+            color: #4299e1;
+            font-size: 0.9rem;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            color: #4a5568;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #48bb78;
+            box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.1);
+        }
+
+        .form-help {
+            color: #718096;
+            font-size: 0.8rem;
+            margin-top: 4px;
+        }
+
+        .preview-box {
+            background: #f0fff4;
+            border: 1px solid #9ae6b4;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+
+        .preview-title {
+            color: #22543d;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .preview-item {
+            color: #2f855a;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+
+        .preview-value {
+            font-weight: 600;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-cancel {
+            background: #f7fafc;
+            color: #4a5568;
+            border: 2px solid #e2e8f0;
+        }
+
+        .btn-cancel:hover {
+            background: #edf2f7;
+        }
+
+        .btn-save {
+            background: linear-gradient(135deg, #48bb78, #38a169);
+            color: white;
+        }
+
+        .btn-save:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(72, 187, 120, 0.3);
+        }
+
+        .demo-note {
+            background: #ebf8ff;
+            border: 1px solid #90cdf4;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 30px;
+        }
+
+        .demo-note h4 {
+            color: #2c5282;
+            margin-bottom: 12px;
+        }
+
+        .demo-note ul {
+            color: #2c5282;
+            margin-left: 20px;
+        }
+
+        .demo-note li {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <div class="demo-header">
+            <h1>🗳️ Vote Assignment Modal Demo</h1>
+            <p>Interactive demonstration of the newly implemented vote limits functionality</p>
+        </div>
+
+        <!-- Users Table -->
+        <div class="users-table">
+            <div class="table-header">
+                <h3>User Management - Users Tab</h3>
+                <p>Click the green vote icon to open the vote assignment modal</p>
+            </div>
+            <div class="table-content">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Last Login</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>
+                                <div class="user-info">
+                                    <div class="user-avatar">JD</div>
+                                    <div class="user-details">
+                                        <h4>John Doe</h4>
+                                        <p>john.doe@company.com</p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span class="role-badge role-admin">Admin</span></td>
+                            <td><span class="status-badge status-active">Active</span></td>
+                            <td>Dec 19, 2024</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="action-btn vote-limits-btn" onclick="openModal('John Doe', 'john.doe@company.com')" title="Set Vote Limits">
+                                        <i class="fas fa-vote-yea"></i>
+                                    </button>
+                                    <button class="action-btn edit-btn" title="Edit User">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="action-btn delete-btn" title="Delete User">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>
+                                <div class="user-info">
+                                    <div class="user-avatar">SM</div>
+                                    <div class="user-details">
+                                        <h4>Sarah Miller</h4>
+                                        <p>sarah.miller@company.com</p>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span class="role-badge role-voter">Voter</span></td>
+                            <td><span class="status-badge status-active">Active</span></td>
+                            <td>Dec 18, 2024</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="action-btn vote-limits-btn" onclick="openModal('Sarah Miller', 'sarah.miller@company.com')" title="Set Vote Limits">
+                                        <i class="fas fa-vote-yea"></i>
+                                    </button>
+                                    <button class="action-btn edit-btn" title="Edit User">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="action-btn delete-btn" title="Delete User">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="demo-note">
+            <h4>🎯 How the Vote Assignment Modal Works:</h4>
+            <ul>
+                <li><strong>Click the green vote icon (📊)</strong> next to any user in the table above</li>
+                <li><strong>Modal opens</strong> with current vote settings pre-filled</li>
+                <li><strong>Adjust settings:</strong> Vote weight, max votes, min votes required</li>
+                <li><strong>Live preview</strong> shows your changes in real-time</li>
+                <li><strong>Save or Cancel</strong> to complete the action</li>
+                <li><strong>Backend integration</strong> saves changes to the database</li>
+                <li><strong>Audit logging</strong> tracks who made changes and when</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Modal (Hidden by default) -->
+    <div class="modal-overlay" id="modalOverlay" style="display: none;">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-icon">
+                    <i class="fas fa-vote-yea"></i>
+                </div>
+                <h3>Set Vote Limits</h3>
+                <p class="modal-subtitle">Configure voting parameters for <span id="modalUserName"></span></p>
+                <p class="user-email">User: <span id="modalUserEmail"></span></p>
+            </div>
+
+            <form onsubmit="saveVoteLimits(event)">
+                <div class="form-group">
+                    <label class="form-label">Vote Weight (1.0 = standard vote)</label>
+                    <input type="number" class="form-input" id="voteWeight" value="1.0" min="0.1" max="10.0" step="0.1" onchange="updatePreview()">
+                    <p class="form-help">Higher values give more voting power</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Maximum Votes Allowed</label>
+                    <input type="number" class="form-input" id="maxVotes" value="1" min="1" max="100" onchange="updatePreview()">
+                    <p class="form-help">Maximum number of votes this user can cast</p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Minimum Votes Required</label>
+                    <input type="number" class="form-input" id="minVotes" value="1" min="0" max="100" onchange="updatePreview()">
+                    <p class="form-help">Minimum number of votes this user must cast</p>
+                </div>
+
+                <div class="preview-box">
+                    <h4 class="preview-title">Current Settings Preview:</h4>
+                    <div class="preview-item">• Vote Weight: <span class="preview-value" id="previewWeight">1.0x</span></div>
+                    <div class="preview-item">• Max Votes: <span class="preview-value" id="previewMax">1</span></div>
+                    <div class="preview-item">• Min Votes: <span class="preview-value" id="previewMin">1</span></div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-save">Save Limits</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function openModal(userName, userEmail) {
+            document.getElementById('modalUserName').textContent = userName;
+            document.getElementById('modalUserEmail').textContent = userEmail;
+            document.getElementById('modalOverlay').style.display = 'flex';
+            updatePreview();
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').style.display = 'none';
+        }
+
+        function updatePreview() {
+            const weight = document.getElementById('voteWeight').value;
+            const max = document.getElementById('maxVotes').value;
+            const min = document.getElementById('minVotes').value;
+            
+            document.getElementById('previewWeight').textContent = weight + 'x';
+            document.getElementById('previewMax').textContent = max;
+            document.getElementById('previewMin').textContent = min;
+        }
+
+        function saveVoteLimits(event) {
+            event.preventDefault();
+            
+            const weight = document.getElementById('voteWeight').value;
+            const max = document.getElementById('maxVotes').value;
+            const min = document.getElementById('minVotes').value;
+            const userName = document.getElementById('modalUserName').textContent;
+            
+            alert(`✅ Vote limits saved successfully for ${userName}!
+            
+Vote Weight: ${weight}x
+Max Votes: ${max}
+Min Votes: ${min}
+
+In the real application, this would:
+• Send data to: PUT /api/admin/users/:id/vote-limits
+• Update the user's voting parameters in the database
+• Create an audit log entry
+• Refresh the user interface
+• Show a success notification`);
+            
+            closeModal();
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('modalOverlay').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeModal();
+            }
+        });
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>

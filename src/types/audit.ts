@@ -1,18 +1,26 @@
 export interface AuditLog {
   id: string;
-  table_name: string;
-  action: 'INSERT' | 'UPDATE' | 'DELETE';
-  record_id: string;
-  old_values?: any;
-  new_values?: any;
-  description: string;
   user_id?: string;
-  user_name?: string;
+  action_type: string;
+  action_category: string;
+  description: string;
+  entity_type?: string;
+  entity_id?: string;
+  metadata?: any;
   ip_address?: string;
   user_agent?: string;
+  status: 'success' | 'failure' | 'warning';
   created_at: string;
-  operation: string; 
-  changed_by: string
+  
+  // Legacy fields for backward compatibility
+  table_name?: string;
+  action?: 'INSERT' | 'UPDATE' | 'DELETE';
+  record_id?: string;
+  old_values?: any;
+  new_values?: any;
+  user_name?: string;
+  operation?: string;
+  changed_by?: string;
 }
 
 export interface ProxyGroup {

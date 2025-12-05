@@ -15,6 +15,65 @@ class Employee {
     return await database.query(sql);
   }
 
+  static async getAllWithDetails() {
+    const sql = `
+      SELECT 
+        e.id, 
+        u.name, 
+        e.position, 
+        d.name as department,
+        u.avatar_url as avatar, 
+        e.bio, 
+        e.years_of_service,
+        e.total_votes, 
+        e.hire_date,
+        e.employee_id,
+        u.email,
+        u.phone_number,
+        e.created_at,
+        e.updated_at,
+        COUNT(DISTINCT ea.id) as achievement_count,
+        COUNT(DISTINCT es.id) as skill_count,
+        AVG(CASE WHEN es.proficiency_level = 'Expert' THEN 4
+                WHEN es.proficiency_level = 'Advanced' THEN 3
+                WHEN es.proficiency_level = 'Intermediate' THEN 2
+                WHEN es.proficiency_level = 'Beginner' THEN 1
+                ELSE 0 END) as avg_skill_level
+      FROM employees e
+      JOIN users u ON e.user_id = u.id
+      LEFT JOIN departments d ON e.department_id = d.id
+      LEFT JOIN employee_achievements ea ON e.id = ea.employee_id
+      LEFT JOIN employee_skills es ON e.id = es.employee_id
+      WHERE e.is_eligible_for_voting = 1
+      GROUP BY e.id, u.name, e.position, d.name, u.avatar_url, e.bio, 
+               e.years_of_service, e.total_votes, e.hire_date, e.employee_id,
+               u.email, u.phone_number, e.created_at, e.updated_at
+      ORDER BY e.total_votes DESC, u.name ASC
+    `;
+    
+    try {
+      const employees = await database.query(sql);
+      
+      // Get skills and achievements for each employee
+      for (const emp of employees) {
+        try {
+          emp.skills = await this.getSkills(emp.id);
+          emp.achievements = await this.getAchievements(emp.id);
+        } catch (error) {
+          console.log(`Error fetching additional data for employee ${emp.id}:`, error.message);
+          emp.skills = [];
+          emp.achievements = [];
+        }
+      }
+      
+      return employees;
+    } catch (error) {
+      console.error('Error in getAllWithDetails:', error);
+      // Fallback to basic query if enhanced query fails
+      return await this.getAllForVoting();
+    }
+  }
+
   static async findById(id) {
     const sql = `
       SELECT e.id, u.name, e.position, d.name as department,

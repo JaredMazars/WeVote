@@ -10,11 +10,15 @@ interface User {
   surname?: string;
   avatar?: string;
   role: string;
-  role_id : string; 
+  role_id : number | string;  // ✅ Add this
   email_verified?: number | boolean;
   needs_password_change?: number | boolean;  // ✅ Add this
   is_temp_password?: number | boolean;       // ✅ Add this
   membership_number?: string;
+  proxy_vote_form?: string; // 'manual', 'digital', or 'abstain'
+  proxy_file_name?: string; // Uploaded file name
+  proxy_file_path?: string; // Uploaded file path
+  proxy_uploaded_at?: string; // Upload timestamp
 }
 
 interface AuthContextType {
@@ -53,28 +57,83 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // Check if user is authenticated on app load
   useEffect(() => {
     const initializeAuth = async () => {
+      console.log('🔄 AuthContext: Initializing authentication...');
+      
       const token = localStorage.getItem('token');
       const savedUser = localStorage.getItem('user');
       
+      console.log('📦 AuthContext: localStorage contents:', {
+        hasToken: !!token,
+        hasSavedUser: !!savedUser,
+        tokenLength: token?.length,
+        savedUserPreview: savedUser?.substring(0, 100)
+      });
+      
       if (token && savedUser) {
         try {
+          const parsedUser = JSON.parse(savedUser);
+          console.log('👤 AuthContext: Parsed user from localStorage:', {
+            id: parsedUser.id,
+            email: parsedUser.email,
+            name: parsedUser.name,
+            role: parsedUser.role,
+            role_id: parsedUser.role_id,
+            role_id_type: typeof parsedUser.role_id
+          });
+          
           // Verify token is still valid
           const response = await ApiService.verifyToken();
+          console.log('🔐 AuthContext: Token verification response:', response);
+          
           if (response.success) {
-            setUser(JSON.parse(savedUser));
+            console.log('✅ AuthContext: Token valid, setting user state');
+            
+            // Use the verified user data from API (which includes role_id)
+            const verifiedUser: User = {
+              id: response.user.id.toString(),
+              email: response.user.email,
+              name: response.user.name,
+              surname: response.user.surname,
+              avatar: response.user.avatar || '',
+              role: response.user.role || 'voter',
+              // ✅ FIX: Check for undefined/null, not falsy (because 0 is valid but falsy)
+              role_id: response.user.role_id !== undefined ? response.user.role_id : parsedUser.role_id,
+              membership_number: response.user.member_number
+            };
+
+            console.log('Role Id from API:', response.user.role_id);
+            console.log('Role Id in verifiedUser:', verifiedUser.role_id);
+            console.log('Role Id type:', typeof verifiedUser.role_id);
+
+            console.log('👤 AuthContext: Final user state:', {
+              id: verifiedUser.id,
+              email: verifiedUser.email,
+              role: verifiedUser.role,
+              role_id: verifiedUser.role_id,
+              role_id_type: typeof verifiedUser.role_id
+            });
+            
+            setUser(verifiedUser);
+            
+            // Update localStorage with verified data
+            localStorage.setItem('user', JSON.stringify(verifiedUser));
           } else {
+            console.warn('⚠️ AuthContext: Token invalid, clearing storage');
             // Token invalid, clear storage
             localStorage.removeItem('token');
             localStorage.removeItem('user');
           }
         } catch (error) {
-          console.error('Token verification failed:', error);
+          console.error('❌ AuthContext: Token verification failed:', error);
           localStorage.removeItem('token');
           localStorage.removeItem('user');
         }
+      } else {
+        console.log('ℹ️ AuthContext: No token or saved user found');
       }
       
       setIsLoading(false);
+      console.log('✅ AuthContext: Initialization complete');
     };
 
     initializeAuth();
@@ -87,8 +146,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const response = await ApiService.login(email, password);
 
     console.log('🔍 Full API Response:', response);
+    console.log('🔍 Response.user object:', response.user);
+    console.log('🔍 Response.user.role_id:', response.user?.role_id);
+    console.log('🔍 Response.user.role_id type:', typeof response.user?.role_id);
 
     if (response.success) {
+      // Log every field from the API response
+      console.log('📋 API Response Fields:', {
+        'response.user.id': response.user.id,
+        'response.user.email': response.user.email,
+        'response.user.name': response.user.name,
+        'response.user.role': response.user.role,
+        'response.user.role_id': response.user.role_id,
+        'response.user.avatar': response.user.avatar,
+        'response.user.surname': response.user.surname
+      });
+
       const userData: User = {
         id: response.user.id.toString(),
         email: response.user.email,
@@ -99,15 +172,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         surname: response.user.surname,
         email_verified: response.user.email_verified,
         needs_password_change: response.user.needs_password_change,
-        is_temp_password: response.user.is_temp_password
+        is_temp_password: response.user.is_temp_password,
+        proxy_vote_form: response.user.proxy_vote_form,  // ✅ ADD THIS - THE MISSING PIECE!
+        proxy_file_name: response.user.proxy_file_name,
+        proxy_file_path: response.user.proxy_file_path,
+        proxy_uploaded_at: response.user.proxy_uploaded_at
       };
 
-      console.log('✅ User role_id:', userData.role_id);  // ✅ Debug log
-      console.log('✅ User role:', userData.role);
+      console.log('✅ AuthContext - User Data Created:', {
+        role: userData.role,
+        role_id: userData.role_id,
+        role_id_type: typeof userData.role_id,
+        proxy_vote_form: userData.proxy_vote_form,  // ✅ Log this too
+        id: userData.id,
+        email: userData.email,
+        name: userData.name
+      });
+
+      console.log('📦 Saving to localStorage:', JSON.stringify(userData, null, 2));
 
       setUser(userData);
       localStorage.setItem('token', response.token);
       localStorage.setItem('user', JSON.stringify(userData));
+      
+      console.log('✅ AuthContext - Data saved to localStorage');
+      console.log('✅ User state after setUser:', userData);
 
       setIsLoading(false);
       return userData;
@@ -163,7 +252,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             surname: response.user.surname,
             avatar: response.user.avatar || '',
             role: response.user.role, 
-            role_id: response.user.role_id
+            role_id: response.user.role_id,
+            proxy_vote_form: response.user.proxy_vote_form
           };
           
           setUser(userData);
@@ -217,7 +307,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             surname: response.user.surname,
             avatar: response.user.avatar || '',
             role: response.user.role,
-            role_id: response.user.role_id
+            role_id: response.user.role_id,
+            proxy_vote_form: response.user.proxy_vote_form
           };
 
           setUser(userData);
@@ -274,7 +365,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               name: response.user.name,
               avatar: response.user.avatar || '',
               role: response.user.role, 
-              role_id: response.user.role_id
+              role_id: response.user.role_id,
+              proxy_vote_form: response.user.proxy_vote_form
             };
 
             setUser(userData);
@@ -316,7 +408,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               surname: response.user.surname,
               avatar: response.user.avatar || '',
               role: response.user.role, 
-              role_id: response.user.role_id
+              role_id: response.user.role_id,
+              proxy_vote_form: response.user.proxy_vote_form
             };
 
             setUser(userData);
