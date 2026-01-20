@@ -98,7 +98,7 @@ router.post('/login', [
 }));
 
 // @route   POST /api/auth/register
-// @desc    Register new user
+// @desc    Register new user (creates active user immediately - for admin/auditor creation)
 // @access  Public
 router.post('/register', [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -121,6 +121,8 @@ router.post('/register', [
   // Create user (default organization ID from env)
   const organizationId = parseInt(process.env.DEFAULT_ORG_ID) || 1;
   
+  // Default role to 'voter' for all new registrations
+  // Candidates can only be created through nomination by admins
   const newUser = await User.create({
     organizationId,
     email,
@@ -128,7 +130,7 @@ router.post('/register', [
     firstName,
     lastName,
     phoneNumber,
-    role: role || 'user'
+    role: role || 'voter'
   });
 
   // Generate token
@@ -146,6 +148,69 @@ router.post('/register', [
       lastName: newUser.LastName,
       role: newUser.Role,
       organizationId: newUser.OrganizationID
+    }
+  });
+}));
+
+// @route   POST /api/auth/register-pending
+// @desc    Register new user (creates pending user requiring admin approval)
+// @access  Public
+router.post('/register-pending', [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('firstName').notEmpty().trim().withMessage('First name is required'),
+  body('lastName').notEmpty().trim().withMessage('Last name is required'),
+  body('phoneNumber').optional().isString().withMessage('Valid phone number required'),
+  body('title').optional().isString(),
+  body('idNumber').optional().isString(),
+  body('idType').optional().isString(),
+  body('dateOfBirth').optional().isISO8601(),
+  body('streetAddress').optional().isString(),
+  body('city').optional().isString(),
+  body('province').optional().isString(),
+  body('postalCode').optional().isString(),
+  body('country').optional().isString(),
+  body('goodStandingIdNumber').optional().isString(),
+  body('proxyVoteForm').optional().isString(),
+  validate
+], asyncHandler(async (req, res) => {
+  const { email, firstName, lastName, phoneNumber, title, idNumber, idType, 
+          dateOfBirth, streetAddress, city, province, postalCode, country,
+          goodStandingIdNumber, proxyVoteForm } = req.body;
+
+  // Check if user already exists
+  const existingUser = await User.findByEmail(email);
+  
+  if (existingUser) {
+    throw new AppError('User with this email already exists', 409);
+  }
+
+  // Create pending user (default organization ID from env)
+  const organizationId = parseInt(process.env.DEFAULT_ORG_ID) || 1;
+  
+  // Create pending user (IsActive=0, RequiresPasswordChange=1)
+  const newUser = await User.createPending({
+    organizationId,
+    email,
+    firstName,
+    lastName,
+    phoneNumber,
+    role: 'voter' // All registrations default to voter
+  });
+
+  // TODO: Store additional registration data (address, etc.) in a separate table if needed
+  // For now, we'll just create the user and admin can see them in pending approvals
+
+  logger.info(`New pending user registered: ${newUser.Email} - awaiting admin approval`);
+
+  res.status(201).json({
+    success: true,
+    message: 'Registration submitted successfully. Your account is pending admin approval. You will receive an email with login credentials once approved.',
+    user: {
+      userId: newUser.UserID,
+      email: newUser.Email,
+      firstName: newUser.FirstName,
+      lastName: newUser.LastName,
+      role: newUser.Role
     }
   });
 }));
@@ -248,6 +313,25 @@ router.post('/first-login-password-change', [
   // Clear the RequiresPasswordChange flag
   await User.clearPasswordChangeRequirement(userId);
 
+  // Log to audit
+  const { executeQuery } = require('../config/database');
+  try {
+    await executeQuery(`
+      INSERT INTO AuditLog (UserID, Action, EntityType, EntityID, Details, IPAddress, UserAgent, CreatedAt)
+      VALUES (@userId, @action, @entityType, @entityId, @details, @ipAddress, @userAgent, GETDATE())
+    `, {
+      userId: userId,
+      action: 'PASSWORD_CHANGED',
+      entityType: 'User',
+      entityId: userId,
+      details: `User changed password on first login`,
+      ipAddress: req.ip || req.connection.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    });
+  } catch (auditError) {
+    logger.error('Failed to log password change to audit:', auditError);
+  }
+
   logger.info(`First-login password changed for user: ${user.Email}`);
 
   res.json({
@@ -287,11 +371,141 @@ router.put('/update-password/:userId', [
     WHERE UserID = @userId
   `, { userId });
 
+  // Log to audit
+  try {
+    await executeQuery(`
+      INSERT INTO AuditLog (UserID, Action, EntityType, EntityID, Details, IPAddress, UserAgent, CreatedAt)
+      VALUES (@userId, @action, @entityType, @entityId, @details, @ipAddress, @userAgent, GETDATE())
+    `, {
+      userId: userId,
+      action: 'PASSWORD_CHANGED',
+      entityType: 'User',
+      entityId: userId,
+      details: `User changed password`,
+      ipAddress: req.ip || req.connection.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    });
+  } catch (auditError) {
+    logger.error('Failed to log password change to audit:', auditError);
+  }
+
   logger.info(`Password updated successfully for user: ${user.Email}`);
 
   res.json({
     success: true,
     message: 'Password updated successfully'
+  });
+}));
+
+// @route   POST /api/auth/forgot-password
+// @desc    Request password reset - generates temporary password
+// @access  Public
+router.post('/forgot-password', [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  validate
+], asyncHandler(async (req, res) => {
+  const { email } = req.body;
+
+  const user = await User.findByEmail(email);
+  
+  if (!user) {
+    // Don't reveal if email exists for security
+    return res.json({
+      message: 'If the email exists, a password reset link has been sent.'
+    });
+  }
+
+  // Generate temporary password (12 characters)
+  const crypto = require('crypto');
+  const tempPassword = crypto.randomBytes(6).toString('hex') + 'A1!';
+  
+  // Update user with temp password and set RequiresPasswordChange flag
+  await User.changePassword(user.UserID, tempPassword);
+  
+  const { executeQuery } = require('../config/database');
+  await executeQuery(`
+    UPDATE Users 
+    SET RequiresPasswordChange = 1 
+    WHERE UserID = @userId
+  `, { userId: user.UserID });
+
+  // Send email with temporary password
+  try {
+    const { sendPasswordResetEmail } = require('../services/emailService');
+    await sendPasswordResetEmail({
+      email: user.Email,
+      firstName: user.FirstName,
+      tempPassword: tempPassword
+    });
+    
+    logger.info(`Password reset email sent to ${email}`);
+  } catch (emailError) {
+    logger.error('Failed to send password reset email:', emailError);
+  }
+
+  // Log to audit
+  try {
+    await executeQuery(`
+      INSERT INTO AuditLog (UserID, Action, EntityType, EntityID, Details, IPAddress, UserAgent, CreatedAt)
+      VALUES (@userId, @action, @entityType, @entityId, @details, @ipAddress, @userAgent, GETDATE())
+    `, {
+      userId: user.UserID,
+      action: 'PASSWORD_RESET_REQUESTED',
+      entityType: 'User',
+      entityId: user.UserID,
+      details: `Password reset requested for ${email}`,
+      ipAddress: req.ip || req.connection.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    });
+  } catch (auditError) {
+    logger.error('Failed to log password reset to audit:', auditError);
+  }
+
+  res.json({
+    message: 'If the email exists, a password reset link has been sent.',
+    tempPassword: tempPassword // In production, remove this - only send via email
+  });
+}));
+
+// @route   POST /api/auth/reset-password
+// @desc    Reset password with temporary password
+// @access  Public
+router.post('/reset-password', [
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('tempPassword').notEmpty().withMessage('Temporary password is required'),
+  body('newPassword').isLength({ min: 8 }).withMessage('New password must be at least 8 characters'),
+  validate
+], asyncHandler(async (req, res) => {
+  const { email, tempPassword, newPassword } = req.body;
+
+  const user = await User.findByEmail(email);
+  
+  if (!user) {
+    throw new AppError('Invalid credentials', 401);
+  }
+
+  // Verify temporary password
+  const isValid = await User.verifyPassword(email, tempPassword);
+  
+  if (!isValid) {
+    throw new AppError('Invalid temporary password', 401);
+  }
+
+  // Update to new password
+  await User.changePassword(user.UserID, newPassword);
+  
+  const { executeQuery } = require('../config/database');
+  await executeQuery(`
+    UPDATE Users 
+    SET RequiresPasswordChange = 0 
+    WHERE UserID = @userId
+  `, { userId: user.UserID });
+
+  logger.info(`Password reset completed for user: ${email}`);
+
+  res.json({
+    message: 'Password reset successfully. You can now login with your new password.',
+    success: true
   });
 }));
 

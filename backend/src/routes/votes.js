@@ -156,4 +156,85 @@ router.get('/user/:userId', [
   });
 }));
 
+// @route   GET /api/votes/verify/:transactionId
+// @desc    Verify vote by vote ID
+// @access  Private - Any authenticated user
+router.get('/verify/:voteId', [
+  param('voteId').isInt().withMessage('Vote ID must be a number'),
+  validate
+], asyncHandler(async (req, res) => {
+  const { voteId } = req.params;
+
+  const { executeQuery } = require('../config/database');
+  
+  // Check candidate votes first
+  let vote = await executeQuery(`
+    SELECT 
+      cv.VoteID,
+      'candidate' as VoteType,
+      cv.SessionID,
+      s.Title as SessionTitle,
+      cv.CandidateID,
+      c.Category as CandidateName,
+      cv.VoterUserID,
+      'Voter-' + CAST(cv.VoterUserID AS NVARCHAR) as VoterIdentifier,
+      cv.VotesAllocated,
+      cv.IsProxyVote,
+      cv.ProxyID,
+      cv.VotedAt
+    FROM CandidateVotes cv
+    INNER JOIN AGMSessions s ON cv.SessionID = s.SessionID
+    INNER JOIN Candidates c ON cv.CandidateID = c.CandidateID
+    WHERE cv.VoteID = @voteId
+  `, { voteId });
+
+  if (vote.recordset.length === 0) {
+    // Check resolution votes if not found in candidate votes
+    vote = await executeQuery(`
+      SELECT 
+        rv.VoteID,
+        'resolution' as VoteType,
+        rv.SessionID,
+        s.Title as SessionTitle,
+        rv.ResolutionID,
+        r.ResolutionTitle,
+        rv.VoterUserID,
+        'Voter-' + CAST(rv.VoterUserID AS NVARCHAR) as VoterIdentifier,
+        rv.VoteChoice,
+        rv.VotesAllocated,
+        rv.IsProxyVote,
+        rv.ProxyID,
+        rv.VotedAt
+      FROM ResolutionVotes rv
+      INNER JOIN AGMSessions s ON rv.SessionID = s.SessionID
+      INNER JOIN Resolutions r ON rv.ResolutionID = r.ResolutionID
+      WHERE rv.VoteID = @voteId
+    `, { voteId });
+  }
+
+  if (vote.recordset.length === 0) {
+    throw new AppError('Vote not found', 404);
+  }
+
+  const voteData = vote.recordset[0];
+
+
+  res.json({
+    verified: true,
+    voteId: voteData.VoteID,
+    vote: {
+      voteType: voteData.VoteType,
+      sessionTitle: voteData.SessionTitle,
+      entityName: voteData.CandidateName || voteData.ResolutionTitle,
+      voteChoice: voteData.VoteChoice || null,
+      votesAllocated: voteData.VotesAllocated,
+      votedAt: voteData.VotedAt,
+      isProxyVote: voteData.IsProxyVote,
+      proxyId: voteData.ProxyID,
+      // Anonymize voter for privacy
+      voterIdentifier: voteData.VoterIdentifier
+    }
+  });
+}));
+
 module.exports = router;

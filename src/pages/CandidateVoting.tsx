@@ -338,8 +338,8 @@ const CandidateVoting: React.FC = () => {
                   <Users className="h-8 w-8 text-white" />
                 </div>
                 <div>
-                  <h1 className="text-3xl font-bold text-[#464B4B]">Candidate Voting</h1>
-                  <p className="text-[#464B4B]/70">Vote for your preferred candidates</p>
+                  <h1 className="text-3xl font-bold text-[#464B4B]">Nominee Voting</h1>
+                  <p className="text-[#464B4B]/70">Vote for your preferred nominees</p>
                 </div>
               </div>
               
@@ -357,7 +357,7 @@ const CandidateVoting: React.FC = () => {
                   <div className="flex items-center space-x-2 mb-2">
                     <Vote className="h-5 w-5 text-blue-600" />
                     <p className="text-sm font-semibold text-blue-900">
-                      Your Vote Weight: {voteWeight.totalWeight}
+                      Votes Available: {voteWeight.totalWeight}
                     </p>
                   </div>
                   {voteWeight.proxyCount > 0 && (
@@ -480,7 +480,7 @@ const CandidateVoting: React.FC = () => {
               <div className="p-6">
                 <h3 className="text-xl font-bold text-[#464B4B] mb-1">{candidate.name}</h3>
                 <p className="text-[#0072CE] font-semibold mb-1">{candidate.position}</p>
-                <p className="text-[#464B4B]/60 text-sm mb-4">{candidate.department}</p>
+                {/* <p className="text-[#464B4B]/60 text-sm mb-4">{candidate.department}</p> */}
                 
                 <p className="text-[#464B4B]/80 text-sm mb-4 line-clamp-3">{candidate.bio}</p>
                 
@@ -542,7 +542,7 @@ const CandidateVoting: React.FC = () => {
                 <div className="p-8">
                   <h2 className="text-3xl font-bold text-[#464B4B] mb-2">{selectedCandidate.name}</h2>
                   <p className="text-[#0072CE] font-semibold text-lg mb-1">{selectedCandidate.position}</p>
-                  <p className="text-[#464B4B]/60 mb-6">{selectedCandidate.department}</p>
+                  {/* <p className="text-[#464B4B]/60 mb-6">{selectedCandidate.department}</p> */}
                   
                   <div className="mb-6">
                     <h3 className="text-lg font-bold text-[#464B4B] mb-3">About</h3>

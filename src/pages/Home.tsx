@@ -52,7 +52,7 @@ const Home: React.FC = () => {
     {
       number: "01",
       title: "Choose Category",
-      description: "Select between Candidate Voting or Resolutions Voting",
+      description: "Select between Nominee Voting or Resolution Voting",
       icon: Vote
     },
     {
@@ -177,7 +177,7 @@ const Home: React.FC = () => {
               How It Works
             </h2>
             <p className="text-xl text-[#464B4B]/70 max-w-2xl mx-auto">
-              Simple, secure, and intuitive voting in just three steps — with powerful proxy options
+              Simple, secure, and intuitive voting in just three steps, with proxy options
             </p>
           </motion.div>
 
@@ -217,10 +217,18 @@ const Home: React.FC = () => {
             <p className="text-[#464B4B]/70 text-lg leading-relaxed mb-6">
               Once you've been designated as a proxy, you can vote on behalf of other members who have granted you that authority. Depending on their preferences, you may receive:
             </p>
-            <ul className="text-left text-[#464B4B]/70 text-lg leading-relaxed list-disc list-inside mb-6">
-              <li><strong>Instructional Voting:</strong> Members specify exactly how you should vote on their behalf.</li>
-              <li><strong>Discretionary Voting:</strong> You are trusted to vote based on your judgment for those members.</li>
+            
+            <ul className="text-left text-[#464B4B]/70 text-lg leading-relaxed list-disc list-inside space-y-4 mb-6">
+              <li>
+                <strong className="text-[#464B4B]">Instructional Voting: </strong>
+                 Members provide detailed instructions on how you should vote on each resolution or nominee. You must follow these directions exactly, without any flexibility or personal judgment. This ensures their preferences are represented accurately, but it also means you cannot adapt if new information or amendments arise during the meeting.
+              </li>
+              <li>
+                <strong className="text-[#464B4B]">Discretionary Voting: </strong>
+                 Members delegate their voting rights to you and trust your judgment to make decisions on their behalf. This approach gives you the flexibility to respond to discussions, changes, or new developments during the meeting. However, it requires a high level of trust, as members relinquish direct control over their vote.
+              </li>
             </ul>
+
             <p className="text-[#464B4B]/70 text-lg leading-relaxed mb-6">
               If applicable, you can also perform <strong>split voting</strong> — dividing your votes among different members based on their individual instructions or preferences.
             </p>
@@ -228,8 +236,8 @@ const Home: React.FC = () => {
               Before casting votes, you'll choose a voting category:
             </p>
             <ul className="text-left text-[#464B4B]/70 text-lg leading-relaxed list-disc list-inside mb-6">
-              <li><strong>Candidate Voting:</strong> Select a specific candidate or cast a proxy vote on behalf of others.</li>
-              <li><strong>Resolution Voting:</strong> Vote Yes, No, or Abstain — either directly or as a proxy.</li>
+              <li><strong>Nominee Voting:</strong> Select a specific nominee or cast a proxy vote on behalf of others.</li>
+              <li><strong>Resolution Voting:</strong> Vote Yes, No, or Abstain, either directly or as a proxy.</li>
             </ul>
             <p className="text-[#464B4B]/70 text-lg leading-relaxed">
               This flexible system ensures every vote is counted accurately and securely, whether cast directly or through a trusted proxy.

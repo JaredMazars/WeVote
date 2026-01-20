@@ -13,8 +13,8 @@ class Attendance {
       // Check if already checked in
       const existingQuery = `
         SELECT AttendanceID 
-        FROM SessionAttendance 
-        WHERE AGMSessionID = @sessionId 
+        FROM Attendance 
+        WHERE SessionID = @sessionId 
         AND UserID = @userId
       `;
 
@@ -28,14 +28,14 @@ class Attendance {
       }
 
       const query = `
-        INSERT INTO SessionAttendance (
-          AGMSessionID, UserID, CheckInTime, CheckInMethod,
-          IPAddress, DeviceInfo, Location
+        INSERT INTO Attendance (
+          SessionID, UserID, CheckInTime, CheckInMethod,
+          IPAddress, DeviceInfo
         )
         OUTPUT INSERTED.*
         VALUES (
           @sessionId, @userId, GETDATE(), @checkInMethod,
-          @ipAddress, @deviceInfo, @location
+          @ipAddress, @deviceInfo
         )
       `;
 
@@ -44,8 +44,7 @@ class Attendance {
         userId: attendanceData.userId,
         checkInMethod: attendanceData.checkInMethod || 'web',
         ipAddress: attendanceData.ipAddress || null,
-        deviceInfo: attendanceData.deviceInfo || null,
-        location: attendanceData.location || null
+        deviceInfo: attendanceData.deviceInfo || null
       };
 
       const result = await executeQuery(query, params);
@@ -63,10 +62,10 @@ class Attendance {
   static async checkOut(sessionId, userId) {
     try {
       const query = `
-        UPDATE SessionAttendance
+        UPDATE Attendance
         SET CheckOutTime = GETDATE()
         OUTPUT INSERTED.*
-        WHERE AGMSessionID = @sessionId
+        WHERE SessionID = @sessionId
         AND UserID = @userId
         AND CheckOutTime IS NULL
       `;
@@ -86,7 +85,7 @@ class Attendance {
   }
 
   // Get session attendance
-  static async getSessionAttendance(sessionId) {
+  static async getAttendance(sessionId) {
     try {
       const query = `
         SELECT 
@@ -97,18 +96,18 @@ class Attendance {
           e.DepartmentID,
           d.DepartmentName,
           DATEDIFF(MINUTE, sa.CheckInTime, ISNULL(sa.CheckOutTime, GETDATE())) as DurationMinutes
-        FROM SessionAttendance sa
+        FROM Attendance sa
         INNER JOIN Users u ON sa.UserID = u.UserID
         LEFT JOIN Employees e ON u.UserID = e.UserID
         LEFT JOIN Departments d ON e.DepartmentID = d.DepartmentID
-        WHERE sa.AGMSessionID = @sessionId
+        WHERE sa.SessionID = @sessionId
         ORDER BY sa.CheckInTime DESC
       `;
 
       const result = await executeQuery(query, { sessionId });
       return result.recordset;
     } catch (error) {
-      logger.error('Error in Attendance.getSessionAttendance:', error);
+      logger.error('Error in Attendance.getAttendance:', error);
       throw error;
     }
   }
@@ -124,8 +123,8 @@ class Attendance {
             WHEN sa.CheckInTime IS NOT NULL THEN 'checked_in'
             ELSE 'not_checked_in'
           END as Status
-        FROM SessionAttendance sa
-        WHERE sa.AGMSessionID = @sessionId
+        FROM Attendance sa
+        WHERE sa.SessionID = @sessionId
         AND sa.UserID = @userId
       `;
 
@@ -152,8 +151,8 @@ class Attendance {
           s.ScheduledStartTime,
           s.ScheduledEndTime,
           DATEDIFF(MINUTE, sa.CheckInTime, ISNULL(sa.CheckOutTime, GETDATE())) as DurationMinutes
-        FROM SessionAttendance sa
-        INNER JOIN AGMSessions s ON sa.AGMSessionID = s.AGMSessionID
+        FROM Attendance sa
+        INNER JOIN AGMSessions s ON sa.SessionID = s.SessionID
         WHERE sa.UserID = @userId
         ORDER BY sa.CheckInTime DESC
       `;
@@ -177,11 +176,11 @@ class Attendance {
           u.LastName,
           u.Email,
           d.DepartmentName
-        FROM SessionAttendance sa
+        FROM Attendance sa
         INNER JOIN Users u ON sa.UserID = u.UserID
         LEFT JOIN Employees e ON u.UserID = e.UserID
         LEFT JOIN Departments d ON e.DepartmentID = d.DepartmentID
-        WHERE sa.AGMSessionID = @sessionId
+        WHERE sa.SessionID = @sessionId
         AND sa.CheckInTime >= DATEADD(MINUTE, -@minutes, GETDATE())
         ORDER BY sa.CheckInTime DESC
       `;
@@ -206,9 +205,9 @@ class Attendance {
           CAST(COUNT(sa.AttendanceID) as FLOAT) / NULLIF(s.TotalVoters, 0) * 100 as AttendancePercentage,
           AVG(DATEDIFF(MINUTE, sa.CheckInTime, ISNULL(sa.CheckOutTime, GETDATE()))) as AvgDurationMinutes
         FROM AGMSessions s
-        LEFT JOIN SessionAttendance sa ON s.AGMSessionID = sa.AGMSessionID
-        WHERE s.AGMSessionID = @sessionId
-        GROUP BY s.TotalVoters, s.AGMSessionID
+        LEFT JOIN Attendance sa ON s.SessionID = sa.SessionID
+        WHERE s.SessionID = @sessionId
+        GROUP BY s.TotalVoters, s.SessionID
       `;
 
       const result = await executeQuery(query, { sessionId });

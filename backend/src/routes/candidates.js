@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { body, param, query } = require('express-validator');
 const Candidate = require('../models/Candidate');
+const Employee = require('../models/Employee');
 const { validate } = require('../middleware/validator');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
@@ -98,26 +99,23 @@ router.get('/:id', [
 router.post('/', [
   authorizeRoles('super_admin', 'admin'),
   body('sessionId').isInt().withMessage('Session ID is required'),
-  body('firstName').trim().notEmpty().withMessage('First name is required'),
-  body('lastName').trim().notEmpty().withMessage('Last name is required'),
-  body('email').optional().isEmail().withMessage('Valid email is required'),
-  body('phoneNumber').optional().isString(),
-  body('department').optional().isString(),
-  body('position').optional().isString(),
-  body('categoryId').optional().isInt().withMessage('Category ID must be an integer'),
-  body('bio').optional().isString(),
-  body('profilePictureURL').optional().isURL().withMessage('Profile picture must be a valid URL'),
-  body('displayOrder').optional().isInt().withMessage('Display order must be an integer'),
+  body('employeeId').isInt().withMessage('Employee ID is required'),
+  body('category').trim().notEmpty().withMessage('Category is required'),
+  body('nominationReason').optional().isString(),
   validate
 ], asyncHandler(async (req, res) => {
+  // Create the candidate linked to an existing employee
   const candidateData = {
-    ...req.body,
-    nominatedBy: req.user.userId
+    sessionId: req.body.sessionId,
+    employeeId: req.body.employeeId,
+    category: req.body.category,
+    nominatedBy: req.user.userId,
+    nominationReason: req.body.nominationReason || null
   };
 
   const candidate = await Candidate.create(candidateData);
 
-  logger.info(`Candidate created by user ${req.user.userId}: ${candidate.FirstName} ${candidate.LastName}`);
+  logger.info(`Candidate created by user ${req.user.userId}: ${candidate.FirstName} ${candidate.LastName} (Employee ID: ${req.body.employeeId})`);
 
   res.status(201).json({
     message: 'Candidate created successfully',

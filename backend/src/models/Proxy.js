@@ -257,19 +257,20 @@ class Proxy {
     try {
       const query = `
         SELECT 
-          pa.ProxyAssignmentID,
+          pa.ProxyID,
           pa.PrincipalUserID,
           u.FirstName + ' ' + u.LastName as PrincipalName,
           u.Email as PrincipalEmail,
-          pa.AssignmentType,
-          pa.MaxVotesAllowed,
-          pa.Notes
+          pa.ProxyType,
+          pa.SessionID,
+          pa.StartDate,
+          pa.EndDate
         FROM ProxyAssignments pa
         INNER JOIN Users u ON pa.PrincipalUserID = u.UserID
-        WHERE pa.ProxyHolderUserID = @proxyHolderId
+        WHERE pa.ProxyUserID = @proxyHolderId
         AND pa.IsActive = 1
-        AND (pa.AGMSessionID = @sessionId OR pa.AGMSessionID IS NULL)
-        AND (pa.ValidUntil IS NULL OR pa.ValidUntil > GETDATE())
+        AND (pa.SessionID = @sessionId OR pa.SessionID IS NULL)
+        AND (pa.EndDate IS NULL OR pa.EndDate > GETDATE())
         ORDER BY u.LastName, u.FirstName
       `;
 
@@ -287,50 +288,54 @@ class Proxy {
       // First create the proxy assignment
       const proxyQuery = `
         INSERT INTO ProxyAssignments (
-          PrincipalUserID, ProxyHolderUserID, AGMSessionID,
-          AssignmentType, ValidFrom, ValidUntil, IsActive
+          PrincipalUserID, ProxyUserID, SessionID,
+          ProxyType, StartDate, EndDate, IsActive
         )
-        OUTPUT INSERTED.ProxyAssignmentID
+        OUTPUT INSERTED.ProxyID
         VALUES (
-          @principalUserId, @proxyHolderId, @sessionId,
-          'instructional', GETDATE(), @validUntil, 1
+          @principalUserId, @proxyUserId, @sessionId,
+          'instructional', GETDATE(), @endDate, 1
         )
       `;
 
       const proxyResult = await executeQuery(proxyQuery, {
         principalUserId: instructionData.principalUserId,
-        proxyHolderId: instructionData.proxyHolderId,
+        proxyUserId: instructionData.proxyUserId,
         sessionId: instructionData.sessionId,
-        validUntil: instructionData.validUntil || null
+        endDate: instructionData.validUntil || null
       });
 
-      const proxyAssignmentId = proxyResult.recordset[0].ProxyAssignmentID;
+      const proxyId = proxyResult.recordset[0].ProxyID;
 
       // Insert instructions
       if (instructionData.instructions && instructionData.instructions.length > 0) {
         for (const instruction of instructionData.instructions) {
+          // Determine which ID field to use based on instruction type
+          const candidateId = instruction.type === 'candidate' ? instruction.targetId : null;
+          const resolutionId = instruction.type === 'resolution' ? instruction.targetId : null;
+          
           await executeQuery(`
             INSERT INTO ProxyInstructions (
-              ProxyAssignmentID, InstructionType, TargetID,
-              VoteChoice, Priority, Notes
+              ProxyID, CandidateID, ResolutionID,
+              InstructionType, VotesToAllocate, Notes
             )
             VALUES (
-              @proxyAssignmentId, @instructionType, @targetId,
-              @voteChoice, @priority, @notes
+              @proxyId, @candidateId, @resolutionId,
+              @instructionType, @votesAllocated, @notes
             )
           `, {
-            proxyAssignmentId,
-            instructionType: instruction.type, // 'candidate' or 'resolution'
-            targetId: instruction.targetId,
-            voteChoice: instruction.voteChoice,
-            priority: instruction.priority || 1,
+            proxyId,
+            candidateId,
+            resolutionId,
+            instructionType: instruction.type,
+            votesAllocated: instruction.votesAllocated || 1,
             notes: instruction.notes || null
           });
         }
       }
 
-      logger.info(`Instructional proxy created: Assignment ID ${proxyAssignmentId}`);
-      return { proxyAssignmentId, message: 'Instructional proxy created successfully' };
+      logger.info(`Instructional proxy created: Proxy ID ${proxyId} with ${instructionData.instructions?.length || 0} instructions`);
+      return await this.findById(proxyId);
     } catch (error) {
       logger.error('Error in Proxy.createInstructional:', error);
       throw error;

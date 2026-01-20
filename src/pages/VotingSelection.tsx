@@ -32,8 +32,8 @@ const VotingSelection: React.FC = () => {
   const votingTypes = [
     {
       id: 'candidate',
-      title: 'Candidate Voting',
-      description: 'Vote for outstanding team members who deserve recognition',
+      title: 'Nominee Voting',
+      description: 'Vote for nominees or cast proxy votes',
       icon: Users,
       gradient: 'from-blue-500 to-cyan-500',
       path: '/voting/candidates'

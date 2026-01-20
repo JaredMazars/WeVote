@@ -28,12 +28,12 @@ class ApiService {
       const data = await response.json();
       
       // Debug logging
-      console.log(`API Response from ${endpoint}:`, { 
-        status: response.status, 
-        ok: response.ok,
-        dataKeys: Object.keys(data),
-        data 
-      });
+      // console.log(`API Response from ${endpoint}:`, { 
+      //   status: response.status, 
+      //   ok: response.ok,
+      //   dataKeys: Object.keys(data),
+      //   data 
+      // });
       
       // Transform backend response format to frontend format
       // Backend may return: {count, users} or {candidates} or {data} etc.

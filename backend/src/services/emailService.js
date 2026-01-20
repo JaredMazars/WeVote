@@ -108,6 +108,96 @@ const sendAdminCredentialsEmail = async ({ email, firstName, password, role }) =
 };
 
 /**
+ * Send user approval email with generated password
+ */
+const sendUserApprovalEmail = async ({ email, firstName, password }) => {
+  try {
+    const loginUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    const mailOptions = {
+      from: `"WeVote Platform" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: 'Welcome to WeVote - Your Account Has Been Approved',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #0072CE 0%, #171C8F 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .credentials { background: white; padding: 20px; border-left: 4px solid #0072CE; margin: 20px 0; border-radius: 5px; }
+            .credential-row { margin: 10px 0; }
+            .credential-label { font-weight: bold; color: #464B4B; }
+            .credential-value { background: #f4f4f4; padding: 8px 12px; border-radius: 5px; font-family: monospace; margin-top: 5px; display: inline-block; }
+            .button { display: inline-block; background: linear-gradient(135deg, #0072CE 0%, #171C8F 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 20px 0; font-weight: bold; }
+            .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .footer { text-align: center; color: #666; font-size: 12px; margin-top: 30px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🎉 Welcome to WeVote</h1>
+              <p>Your account has been approved</p>
+            </div>
+            <div class="content">
+              <p>Hello ${firstName},</p>
+              
+              <p>Great news! Your registration has been approved. You can now access the WeVote voting platform.</p>
+              
+              <div class="credentials">
+                <div class="credential-row">
+                  <div class="credential-label">Email Address:</div>
+                  <div class="credential-value">${email}</div>
+                </div>
+                <div class="credential-row">
+                  <div class="credential-label">Temporary Password:</div>
+                  <div class="credential-value">${password}</div>
+                </div>
+              </div>
+              
+              <div class="warning">
+                <strong>⚠️ Important Security Notice:</strong>
+                <p style="margin: 10px 0 0 0;">For security reasons, you will be required to change this password upon your first login. Please keep this email secure and do not share your credentials with anyone.</p>
+              </div>
+              
+              <div style="text-align: center;">
+                <a href="${loginUrl}/login" class="button">Login to WeVote</a>
+              </div>
+              
+              <p style="margin-top: 30px;"><strong>Next Steps:</strong></p>
+              <ol>
+                <li>Click the "Login to WeVote" button above</li>
+                <li>Enter your email and temporary password</li>
+                <li>You'll be prompted to create a new secure password</li>
+                <li>Start participating in voting!</li>
+              </ol>
+              
+              <p>If you have any questions or need assistance, please contact your system administrator.</p>
+              
+              <div class="footer">
+                <p>This is an automated message from WeVote Platform.</p>
+                <p>&copy; ${new Date().getFullYear()} Forvis Mazars. All rights reserved.</p>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    logger.info(`User approval email sent to ${email}: ${info.messageId}`);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    logger.error('Error sending user approval email:', error);
+    throw error;
+  }
+};
+
+/**
  * Send session assignment notification email
  */
 const sendSessionAssignmentEmail = async ({ email, firstName, sessionTitle, sessionDate, role, password = null }) => {
@@ -226,6 +316,7 @@ const verifyEmailConfig = async () => {
 
 module.exports = {
   sendAdminCredentialsEmail,
+  sendUserApprovalEmail,
   sendSessionAssignmentEmail,
   verifyEmailConfig
 };

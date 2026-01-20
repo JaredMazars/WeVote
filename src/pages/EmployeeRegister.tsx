@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import {
   User,
-  Phone,
   MapPin,
   FileText,
   ArrowLeft,
@@ -12,9 +11,7 @@ import {
   Save,
   Eye,
   EyeOff,
-  Download,
-  X,
-  Award
+  Download
 } from 'lucide-react';
 
 interface EmployeeFormData {
@@ -30,23 +27,8 @@ interface EmployeeFormData {
   province: string;
   postalCode: string;
   country: string;
-  bio: string;
-  skills: Array<{
-    skill_name: string;
-    proficiency_level: string;
-    years_experience: number;
-    certified: boolean;
-  }>;
-  achievements: Array<{
-    title: string;
-    description: string;
-    achievement_date: string;
-    category: string;
-    points: number;
-  }>;
   goodStandingIdNumber: string;
   idType: string;
-  isCandidate: boolean;
 }
 
 const EmployeeRegister: React.FC = () => {
@@ -55,16 +37,7 @@ const EmployeeRegister: React.FC = () => {
   const [showSensitiveData, setShowSensitiveData] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [newSkill, setNewSkill] = useState('');
-  const [newSkillLevel, setNewSkillLevel] = useState('intermediate');
-  const [newSkillYears, setNewSkillYears] = useState(0);
-  const [newSkillCertified, setNewSkillCertified] = useState(false);
-  const [newAchievement, setNewAchievement] = useState('');
-  const [newAchievementDesc, setNewAchievementDesc] = useState('');
-  const [newAchievementCategory, setNewAchievementCategory] = useState('other');
-  const [newAchievementPoints, setNewAchievementPoints] = useState(0);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
-  const [candidateChoice, setCandidateChoice] = useState<'candidate' | 'voter' | null>(null);
 
   const [formData, setFormData] = useState<EmployeeFormData>({
     title: '',
@@ -80,14 +53,10 @@ const EmployeeRegister: React.FC = () => {
     postalCode: '',
     country: 'South Africa',
     idType: '',
-    bio: '',
-    skills: [],
-    achievements: [],
-    goodStandingIdNumber: '',
-    isCandidate: false
+    goodStandingIdNumber: ''
   });
 
-  const totalSteps = 4;
+  const totalSteps = 3;
 
   const handleInputChange = (field: keyof EmployeeFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -96,70 +65,6 @@ const EmployeeRegister: React.FC = () => {
     }
   };
 
-  const handleAddSkill = () => {
-    if (formData.skills.length >= 3) {
-      alert('Maximum 3 skills can be added');
-      return;
-    }
-    if (newSkill.trim()) {
-      setFormData(prev => ({
-        ...prev,
-        skills: [
-          ...prev.skills,
-          {
-            skill_name: newSkill.trim(),
-            proficiency_level: newSkillLevel,
-            years_experience: newSkillYears,
-            certified: newSkillCertified
-          }
-        ]
-      }));
-      setNewSkill('');
-      setNewSkillLevel('intermediate');
-      setNewSkillYears(0);
-      setNewSkillCertified(false);
-    }
-  };
-
-  const handleRemoveSkill = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      skills: prev.skills.filter((_, i) => i !== index)
-    }));
-  };
-
-  const handleAddAchievement = () => {
-    if (formData.achievements.length >= 3) {
-      alert('Maximum 3 achievements can be added');
-      return;
-    }
-    if (newAchievement.trim()) {
-      setFormData(prev => ({
-        ...prev,
-        achievements: [
-          ...prev.achievements,
-          {
-            title: newAchievement.trim(),
-            description: newAchievementDesc.trim(),
-            achievement_date: new Date().toISOString().split('T')[0],
-            category: newAchievementCategory,
-            points: newAchievementPoints
-          }
-        ]
-      }));
-      setNewAchievement('');
-      setNewAchievementDesc('');
-      setNewAchievementCategory('other');
-      setNewAchievementPoints(0);
-    }
-  };
-
-  const handleRemoveAchievement = (index: number) => {
-    setFormData(prev => ({
-      ...prev,
-      achievements: prev.achievements.filter((_, i) => i !== index)
-    }));
-  };
 
   const validateStep = (step: number): boolean => {
     const newErrors: Record<string, string> = {};
@@ -236,100 +141,93 @@ const EmployeeRegister: React.FC = () => {
 
       const payload = {
         title: formData.title,
-        initials: `${formData.firstName.charAt(0)}${formData.lastName.charAt(0)}`,
-        id_number: formData.idNumber,
-        id_type: formData.idType,
-        name: formData.firstName,
-        lastname: formData.lastName,
-        email: formData.email,
-        phone: formData.phone,
-        date_of_birth: formData.dateOfBirth,
-        street_address: formData.streetAddress,
-        city: formData.city,
-        province: formData.province,
-        postal_code: formData.postalCode,
-        country: formData.country,
-        bio: formData.isCandidate ? formData.bio : null,
-        skills: formData.isCandidate ? formData.skills : [],
-        achievements: formData.isCandidate ? formData.achievements : [],
-        good_standing_id_number: formData.goodStandingIdNumber,
-        proxy_vote_form: proxyVoteForm,
-        is_candidate: formData.isCandidate
-      };
-
-      console.log('📤 TESTING MODE - Registration payload:', JSON.stringify(payload, null, 2));
-
-      // ==========================================
-      // TESTING MODE - NO BACKEND REQUIRED
-      // ==========================================
-      // Simulate successful registration by storing data in localStorage
-      localStorage.setItem('testUser', JSON.stringify({
-        email: formData.email,
         firstName: formData.firstName,
         lastName: formData.lastName,
-        isCandidate: formData.isCandidate,
-        proxyChoice: proxyVoteForm,
-        registeredAt: new Date().toISOString()
-      }));
+        email: formData.email,
+        phoneNumber: formData.phone,
+        idNumber: formData.idNumber,
+        idType: formData.idType,
+        dateOfBirth: formData.dateOfBirth,
+        streetAddress: formData.streetAddress,
+        city: formData.city,
+        province: formData.province,
+        postalCode: formData.postalCode,
+        country: formData.country,
+        goodStandingIdNumber: formData.goodStandingIdNumber,
+        proxyVoteForm: proxyVoteForm
+      };
 
-      // Set proxy choice flags for dashboard logic
+      console.log('📤 Registration payload:', JSON.stringify(payload, null, 2));
+
+      // Call backend API to register pending user
+      const response = await fetch('http://localhost:3001/api/auth/register-pending', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        // Show detailed error message from backend
+        const errorMessage = result.message || result.error || 
+                           (result.errors ? JSON.stringify(result.errors) : '') ||
+                           'Registration failed. Please try again.';
+        console.error('Registration error response:', result);
+        throw new Error(errorMessage);
+      }
+
+      if (!result.success) {
+        throw new Error(result.message || 'Registration failed. Please try again.');
+      }
+
+      console.log('✅ Registration successful:', result);
+
+      // Store proxy choice for later use (after approval)
       localStorage.setItem(`proxyChoice_${formData.email}`, proxyVoteForm);
       
       if (proxyVoteForm === 'digital') {
         localStorage.setItem(`needsProxy_${formData.email}`, 'true');
-        console.log(`✅ Set needsProxy_${formData.email} = true (Digital Proxy)`);
       } else if (proxyVoteForm === 'manual') {
         localStorage.setItem(`needsManualUpload_${formData.email}`, 'true');
-        console.log(`✅ Set needsManualUpload_${formData.email} = true (Manual Proxy)`);
       }
 
-      console.log(`✅ Set proxyChoice_${formData.email} = ${proxyVoteForm}`);
-      console.log('✅ Registration successful (TEST MODE)');
-
-      // Simulate delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      if (proxyVoteForm === 'digital') {
-        alert(
-          '✅ Registration complete! (TEST MODE)\n\n' +
-          'Proxy Choice: DIGITAL\n' +
-          'On dashboard, you will see: "Proxy Assignment" button\n\n' +
-          'localStorage keys set:\n' +
-          `- proxyChoice_${formData.email} = digital\n` +
-          `- needsProxy_${formData.email} = true`
-        );
-      } else if (proxyVoteForm === 'manual') {
-        alert(
-          '✅ Registration complete! (TEST MODE)\n\n' +
-          'Proxy Choice: MANUAL\n' +
-          'On dashboard, you will see: "Upload Proxy Form" button\n\n' +
-          'localStorage keys set:\n' +
-          `- proxyChoice_${formData.email} = manual\n` +
-          `- needsManualUpload_${formData.email} = true`
-        );
-      } else {
-        alert(
-          '✅ Registration complete! (TEST MODE)\n\n' +
-          'Proxy Choice: ABSTAIN\n' +
-          'No proxy-related buttons will appear on dashboard\n\n' +
-          'localStorage keys set:\n' +
-          `- proxyChoice_${formData.email} = abstain`
-        );
-      }
+      alert(
+        '✅ Registration Submitted Successfully!\n\n' +
+        'Your registration is pending admin approval.\n' +
+        'You will receive an email with your login credentials once your account is approved.\n\n' +
+        'Please check your email for further instructions.'
+      );
 
       setTimeout(() => {
         navigate('/login', { 
           state: { 
-            email: formData.email, 
-            testMode: true,
-            proxyChoice: proxyVoteForm 
+            email: formData.email,
+            pendingApproval: true
           } 
         });
       }, 2000);
 
     } catch (error: any) {
       console.error('❌ Registration error:', error);
-      alert(error.message || 'Registration failed. Please try again.');
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // Show user-friendly error message
+      let errorMessage = 'Registration failed. Please try again.';
+      
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error instanceof TypeError && error.message.includes('fetch')) {
+        errorMessage = 'Unable to connect to server. Please ensure the backend server is running on http://localhost:3001';
+      }
+      
+      alert(`❌ ${errorMessage}\n\nPlease check:\n- Backend server is running\n- All required fields are filled\n- Email format is correct\n- Phone number is valid`);
     } finally {
       setLoading(false);
     }
@@ -698,237 +596,6 @@ const EmployeeRegister: React.FC = () => {
         );
 
       case 3:
-        // Show Candidate/Voter choice if not yet selected
-        if (!candidateChoice) {
-          return (
-            <div className="space-y-6">
-              <div className="text-center mb-8">
-                <Award className="h-16 w-16 text-blue-600 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold text-gray-900 mb-2">
-                  Are you a candidate in the voting process?
-                </h2>
-                <p className="text-gray-600 text-lg">
-                  Please select your participation type
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-6">
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setCandidateChoice('candidate');
-                    setFormData(prev => ({ ...prev, isCandidate: true }));
-                  }}
-                  className="p-8 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-2xl hover:shadow-xl transition-all"
-                >
-                  <Award className="h-12 w-12 mx-auto mb-4" />
-                  <h3 className="text-2xl font-bold mb-2">Yes, I'm a Candidate</h3>
-                  <p className="text-blue-100">
-                    I'm running in the election and would like to add my bio, skills, and
-                    achievements
-                  </p>
-                </motion.button>
-
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => {
-                    setCandidateChoice('voter');
-                    setFormData(prev => ({ ...prev, isCandidate: false }));
-                    setCurrentStep(4); // Skip to proxy options
-                  }}
-                  className="p-8 bg-gradient-to-r from-gray-500 to-gray-700 text-white rounded-2xl hover:shadow-xl transition-all"
-                >
-                  <User className="h-12 w-12 mx-auto mb-4" />
-                  <h3 className="text-2xl font-bold mb-2">No, I'm Just a Voter</h3>
-                  <p className="text-gray-100">I'm here to participate in voting only</p>
-                </motion.button>
-              </div>
-            </div>
-          );
-        }
-
-        // Show candidate portfolio info if they selected candidate
-        if (candidateChoice === 'candidate') {
-          return (
-            <div className="space-y-6">
-              <div className="text-center mb-8">
-                <Phone className="h-12 w-12 text-blue-600 mx-auto mb-4" />
-                <h2 className="text-2xl font-bold text-gray-900">Candidate Portfolio</h2>
-                <p className="text-gray-600">Share your qualifications with voters</p>
-              </div>
-
-              <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h3 className="font-semibold text-blue-800 mb-4">
-                    Candidate Information (Optional)
-                  </h3>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
-                      <textarea
-                        value={formData.bio}
-                        onChange={e => handleInputChange('bio', e.target.value)}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Tell voters about yourself..."
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Skills (Max 3)
-                      </label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                        <input
-                          type="text"
-                          value={newSkill}
-                          onChange={e => setNewSkill(e.target.value)}
-                          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Skill name"
-                        />
-                        <select
-                          value={newSkillLevel}
-                          onChange={e => setNewSkillLevel(e.target.value)}
-                          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                          <option value="beginner">Beginner</option>
-                          <option value="intermediate">Intermediate</option>
-                          <option value="advanced">Advanced</option>
-                          <option value="expert">Expert</option>
-                        </select>
-                        <input
-                          type="number"
-                          value={newSkillYears}
-                          onChange={e => setNewSkillYears(parseInt(e.target.value) || 0)}
-                          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Years experience"
-                          min="0"
-                        />
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={newSkillCertified}
-                            onChange={e => setNewSkillCertified(e.target.checked)}
-                            className="w-4 h-4 text-blue-600"
-                          />
-                          <span className="text-sm text-gray-700">Certified</span>
-                        </label>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddSkill}
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                      >
-                        Add Skill
-                      </button>
-                      {formData.skills.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {formData.skills.map((skill, index) => (
-                            <span
-                              key={index}
-                              className="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
-                            >
-                              {skill.skill_name} ({skill.proficiency_level})
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveSkill(index)}
-                                className="hover:text-blue-600 transition-colors"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Achievements (Max 3)
-                      </label>
-                      <div className="space-y-2 mb-3">
-                        <input
-                          type="text"
-                          value={newAchievement}
-                          onChange={e => setNewAchievement(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Achievement title"
-                        />
-                        <textarea
-                          value={newAchievementDesc}
-                          onChange={e => setNewAchievementDesc(e.target.value)}
-                          rows={2}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          placeholder="Description (optional)"
-                        />
-                        <div className="grid grid-cols-2 gap-3">
-                          <select
-                            value={newAchievementCategory}
-                            onChange={e => setNewAchievementCategory(e.target.value)}
-                            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          >
-                            <option value="award">Award</option>
-                            <option value="certification">Certification</option>
-                            <option value="milestone">Milestone</option>
-                            <option value="recognition">Recognition</option>
-                            <option value="other">Other</option>
-                          </select>
-                          <input
-                            type="number"
-                            value={newAchievementPoints}
-                            onChange={e => setNewAchievementPoints(parseInt(e.target.value) || 0)}
-                            className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Points"
-                            min="0"
-                          />
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddAchievement}
-                        className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                      >
-                        Add Achievement
-                      </button>
-                      {formData.achievements.length > 0 && (
-                        <div className="space-y-2 mt-3">
-                          {formData.achievements.map((achievement, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center justify-between px-3 py-2 bg-green-50 border border-green-200 rounded-lg group hover:bg-green-100 transition-colors"
-                            >
-                              <div>
-                                <span className="text-sm text-green-800 font-medium">
-                                  {achievement.title}
-                                </span>
-                                <span className="text-xs text-green-600 ml-2">
-                                  ({achievement.category})
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveAchievement(index)}
-                                className="text-green-600 hover:text-green-800 transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                <X className="h-4 w-4" />
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        }
-
-        return null;
-
-      case 4:
         return (
           <div className="space-y-6">
             <div className="text-center mb-8">
@@ -1004,7 +671,7 @@ const EmployeeRegister: React.FC = () => {
             <span>Back to Login</span>
           </motion.button>
 
-          {currentStep < 4 && (
+          {currentStep < 3 && (
             <>
               <div className="flex items-center justify-between mb-6">
                 <div>
@@ -1045,9 +712,6 @@ const EmployeeRegister: React.FC = () => {
                   Address
                 </span>
                 <span className={currentStep >= 3 ? 'text-blue-600 font-medium' : ''}>
-                  Candidate/Voter
-                </span>
-                <span className={currentStep >= 4 ? 'text-blue-600 font-medium' : ''}>
                   Proxy Form
                 </span>
               </div>
@@ -1065,7 +729,7 @@ const EmployeeRegister: React.FC = () => {
           {renderStepContent()}
         </motion.div>
 
-        {currentStep <= 4 && (
+        {currentStep <= 3 && (
           <div className="flex justify-between mt-8">
             <motion.button
               whileHover={{ scale: 1.02 }}
@@ -1078,12 +742,11 @@ const EmployeeRegister: React.FC = () => {
               <span>Previous</span>
             </motion.button>
 
-            {currentStep < 4 ? (
+            {currentStep < 3 ? (
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={handleNext}
-                disabled={currentStep === 3 && !candidateChoice}
                 className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <span>Next</span>

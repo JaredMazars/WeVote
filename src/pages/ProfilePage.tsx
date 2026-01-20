@@ -290,31 +290,6 @@ const ProfilePage: React.FC = () => {
                     <p className="text-[#464B4B] font-medium">{profile.phone}</p>
                   )}
                 </div>
-
-                <div>
-                  <label className="flex items-center space-x-2 text-sm font-semibold text-[#464B4B]/70 mb-2">
-                    <Building className="h-4 w-4" />
-                    <span>Department</span>
-                  </label>
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={editedProfile.department}
-                      onChange={(e) => setEditedProfile({ ...editedProfile, department: e.target.value })}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0072CE] focus:outline-none"
-                    />
-                  ) : (
-                    <p className="text-[#464B4B] font-medium">{profile.department}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="flex items-center space-x-2 text-sm font-semibold text-[#464B4B]/70 mb-2">
-                    <User className="h-4 w-4" />
-                    <span>Employee ID</span>
-                  </label>
-                  <p className="text-[#464B4B] font-medium">{profile.employeeId}</p>
-                </div>
               </div>
             </motion.div>
 

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Login Test</title>
+</head>
+<body>
+    <h1>WeVote Login Test</h1>
+    <button onclick="testLogin()">Test Login</button>
+    <pre id="result"></pre>
+
+    <script>
+        async function testLogin() {
+            const resultEl = document.getElementById('result');
+            resultEl.textContent = 'Testing login...';
+
+            try {
+                const response = await fetch('http://localhost:3001/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: 'employee@forvismazars.com',
+                        password: 'employee123'
+                    })
+                });
+
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers);
+
+                const data = await response.json();
+                resultEl.textContent = JSON.stringify(data, null, 2);
+                
+                if (response.ok) {
+                    console.log('✅ Login successful!', data);
+                } else {
+                    console.error('❌ Login failed:', data);
+                }
+            } catch (error) {
+                console.error('❌ Error:', error);
+                resultEl.textContent = 'Error: ' + error.message;
+            }
+        }
+    </script>
+</body>
+</html>

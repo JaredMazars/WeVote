@@ -22,20 +22,15 @@ const VotingTimerBar: React.FC = () => {
   // Fetch active AGM session from backend
   const fetchActiveSession = async () => {
     try {
-      console.log('[VotingTimerBar] Fetching active session...');
       const response = await api.get('/sessions?status=in_progress');
       const sessions = (response.data as any)?.sessions || [];
       
-      console.log('[VotingTimerBar] In-progress sessions:', sessions);
-      
       if (sessions.length > 0) {
-        console.log('[VotingTimerBar] Found active session:', sessions[0]);
         setAgmSession(sessions[0]); // Get first active session
       } else {
         // Check for scheduled sessions
         const scheduledResponse = await api.get('/sessions?status=scheduled');
         const scheduledSessions = (scheduledResponse.data as any)?.sessions || [];
-        console.log('[VotingTimerBar] Scheduled sessions:', scheduledSessions);
         
         if (scheduledSessions.length > 0) {
           setAgmSession(scheduledSessions[0]);
@@ -54,7 +49,6 @@ const VotingTimerBar: React.FC = () => {
               setAgmSession(null);
             }
           } else {
-            console.log('[VotingTimerBar] No sessions found');
             setAgmSession(null);
           }
         }
@@ -68,7 +62,6 @@ const VotingTimerBar: React.FC = () => {
   };
 
   useEffect(() => {
-    console.log('[VotingTimerBar] Component mounted, fetching session...');
     fetchActiveSession();
     
     // Poll for updates every 10 seconds (reduced from 30)

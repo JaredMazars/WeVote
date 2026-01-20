@@ -135,9 +135,11 @@ class VoteAllocation {
             -- Current vote usage
             (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID) AS CandidateVotesUsed,
             (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID) AS ResolutionVotesUsed,
-            -- Remaining votes
-            (va.MaxCandidateVotes - (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID)) AS CandidateVotesRemaining,
-            (va.MaxResolutionVotes - (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID)) AS ResolutionVotesRemaining
+            -- Remaining votes (use AllocatedVotes for all)
+            (va.AllocatedVotes - (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID)) AS CandidateVotesRemaining,
+            (va.AllocatedVotes - (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID)) AS ResolutionVotesRemaining,
+            va.AllocatedVotes AS MaxCandidateVotes,
+            va.AllocatedVotes AS MaxResolutionVotes
           FROM VoteAllocations va
           WHERE va.UserID = @userId AND va.SessionID = @sessionId
         `);
@@ -155,9 +157,8 @@ class VoteAllocation {
       const pool = await getPool();
       
       const allowedFields = [
-        'MaxCandidateVotes', 
-        'MaxResolutionVotes', 
-        'AllowSplitVoting',
+        'AllocatedVotes', 
+        'Reason',
         'Notes'
       ];
       

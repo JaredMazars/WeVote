@@ -22,16 +22,20 @@ const app = express();
 // MIDDLEWARE
 // =====================================================
 
-// Security
-app.use(helmet());
-
-// CORS
+// CORS - Must be before helmet for preflight requests
 const corsOptions = {
   origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:5173',
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 app.use(cors(corsOptions));
+
+// Security - Configure helmet to work with CORS
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
@@ -49,16 +53,20 @@ if (process.env.NODE_ENV !== 'test') {
   }));
 }
 
-// Rate limiting - DISABLED for development
-// const limiter = rateLimit({
-//   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-//   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // limit each IP to 1000 requests per windowMs (increased for dev)
-//   message: 'Too many requests from this IP, please try again later.',
-//   standardHeaders: true,
-//   legacyHeaders: false,
-// });
+// Rate limiting - ENABLED for security (relaxed for development)
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // Increased to 1000 for development
+  message: { error: 'Too many requests from this IP, please try again later.' }, // JSON format
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for health check
+    return req.path === '/health';
+  }
+});
 
-// app.use('/api', limiter);
+app.use('/api', limiter);
 
 // =====================================================
 // ROUTES
@@ -96,6 +104,7 @@ app.use('/api/whatsapp', authenticateToken, require('./routes/whatsapp'));
 app.use('/api/blockchain', authenticateToken, require('./routes/blockchain'));
 app.use('/api/audit-logs', authenticateToken, require('./routes/audit'));
 app.use('/api/vote-splitting', authenticateToken, require('./routes/voteSplitting'));
+app.use('/api/notifications', authenticateToken, require('./routes/notifications'));
 
 // 404 handler
 app.use(notFound);

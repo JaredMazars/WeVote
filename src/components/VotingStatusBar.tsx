@@ -163,22 +163,24 @@ const VotingStatusBar: React.FC = () => {
 
   useEffect(() => {
     const fetchVotingStatus = async () => {
+      console.log('🔄 VotingStatusBar: Starting to fetch voting status...');
       setLoading(true);
       setError(null);
       try {
         const userId = getCurrentUserId();
+        console.log('👤 VotingStatusBar: User ID:', userId);
+        
         if (!userId) {
-          console.error('No user ID available');
           // Use demo data for John Voter
+          console.log('⚠️ VotingStatusBar: No user ID, using demo data');
           setVotingStatus(getDemoVotingStatus());
           setLoading(false);
           return;
         }
 
-        console.log('Fetching data for user:', userId);
-
         // Get active session
         const sessionId = 1;
+        console.log('📊 VotingStatusBar: Fetching data for session:', sessionId);
         
         // Fetch vote allocation with timeout and error handling
         const token = localStorage.getItem('token');
@@ -193,50 +195,59 @@ const VotingStatusBar: React.FC = () => {
 
         // Try to fetch allocation data
         try {
+          console.log('📡 VotingStatusBar: Fetching allocations...');
           const allocationResponse = await fetchWithTimeout(
             `http://localhost:3001/api/allocations/user/${userId}/${sessionId}`,
             { headers },
             5000
           );
           
+          console.log('📡 VotingStatusBar: Allocation response status:', allocationResponse.status);
           if (allocationResponse.ok) {
             const allocationData = await allocationResponse.json();
+            console.log('✅ VotingStatusBar: Allocation data:', allocationData);
             allocatedVotes = allocationData.allocation?.AllocatedVotes || 15;
           }
         } catch (err) {
-          console.warn('Failed to fetch allocations, using default:', err);
+          console.warn('⚠️ VotingStatusBar: Failed to fetch allocations, using default:', err);
         }
         
         // Try to fetch proxy assignments
         try {
+          console.log('📡 VotingStatusBar: Fetching proxies...');
           const proxyResponse = await fetchWithTimeout(
             `http://localhost:3001/api/proxy/holder/${userId}`,
             { headers },
             5000
           );
           
+          console.log('📡 VotingStatusBar: Proxy response status:', proxyResponse.status);
           if (proxyResponse.ok) {
             const proxyData = await proxyResponse.json();
+            console.log('✅ VotingStatusBar: Proxy data:', proxyData);
             proxies = proxyData.proxies || [];
           }
         } catch (err) {
-          console.warn('Failed to fetch proxies, using default:', err);
+          console.warn('⚠️ VotingStatusBar: Failed to fetch proxies, using default:', err);
         }
         
         // Try to fetch vote history
         try {
+          console.log('📡 VotingStatusBar: Fetching vote history...');
           const votesResponse = await fetchWithTimeout(
             `http://localhost:3001/api/votes/user/${userId}?sessionId=${sessionId}`,
             { headers },
             5000
           );
           
+          console.log('📡 VotingStatusBar: Votes response status:', votesResponse.status);
           if (votesResponse.ok) {
             const votesData = await votesResponse.json();
+            console.log('✅ VotingStatusBar: Votes data:', votesData);
             votes = votesData.votes || [];
           }
         } catch (err) {
-          console.warn('Failed to fetch votes, using default:', err);
+          console.warn('⚠️ VotingStatusBar: Failed to fetch votes, using default:', err);
         }
         
         // Calculate proxy votes
@@ -300,7 +311,7 @@ const VotingStatusBar: React.FC = () => {
           myProxyGroups: []
         };
 
-        console.log('Voting status data:', votingStatusData);
+        console.log('✅ VotingStatusBar: Final voting status:', votingStatusData);
         setVotingStatus(votingStatusData);
         
         // Broadcast initial voting status for other components
@@ -311,11 +322,15 @@ const VotingStatusBar: React.FC = () => {
             totalVotesUsed: votingStatusData.totalVotesUsed
           }
         }));
+        console.log('📢 VotingStatusBar: Broadcasted votingStatusLoaded event');
       } catch (error) {
-        console.error('Error loading voting status:', error);
+        console.error('❌ VotingStatusBar: Error loading voting status:', error);
         // Fallback to demo data on error
-        setVotingStatus(getDemoVotingStatus());
+        const demoData = getDemoVotingStatus();
+        console.log('⚠️ VotingStatusBar: Using demo data fallback:', demoData);
+        setVotingStatus(demoData);
       } finally {
+        console.log('✅ VotingStatusBar: Setting loading to false');
         setLoading(false);
       }
     };
@@ -324,19 +339,16 @@ const VotingStatusBar: React.FC = () => {
 
     // Set up event listener for proxy updates
     const handleProxyUpdate = () => {
-      console.log('Proxy data updated, refreshing voting status...');
       fetchVotingStatus();
     };
 
     // Set up event listener for voting status updates (when votes are cast/removed)
     const handleVotingStatusUpdate = () => {
-      console.log('Voting status updated, refreshing...');
       fetchVotingStatus();
     };
 
     // Set up event listener for proxy vote allocation
     const handleProxyVoteAllocation = (event: CustomEvent) => {
-      console.log('Proxy votes being allocated:', event.detail);
       if (votingStatus) {
         const { allocated } = event.detail;
         setVotingStatus(prev => {
@@ -367,7 +379,6 @@ const VotingStatusBar: React.FC = () => {
 
     // Set up event listener for vote assignment by admin
     const handleVotesAssigned = () => {
-      console.log('Votes assigned by admin, refreshing voting status...');
       fetchVotingStatus();
     };
 
@@ -384,7 +395,7 @@ const VotingStatusBar: React.FC = () => {
       window.removeEventListener('requestVotingStatus', handleRequestVotingStatus as EventListener);
       window.removeEventListener('votesAssigned', handleVotesAssigned);
     };
-  }, [getCurrentUserId, votingStatus]);
+  }, [getCurrentUserId]);
 
   const getVoteTypeIcon = (type: string) => {
     return type === 'employee' ? <User className="h-4 w-4" /> : <Vote className="h-4 w-4" />;

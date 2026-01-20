@@ -489,13 +489,13 @@ const ProxyAppointmentFormAssignee: React.FC = () => {
                   >
                     {showSensitiveData ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                   </button>
-                  <button
+                  {/* <button
                     onClick={copyFormLink}
                     className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white rounded-lg hover:shadow-lg transition-all"
                   >
                     <Share2 className="h-4 w-4" />
                     <span>Share</span>
-                  </button>
+                  </button> */}
                 </div>
               </div>
             </div>
@@ -509,7 +509,7 @@ const ProxyAppointmentFormAssignee: React.FC = () => {
           >
             <div className="flex items-center space-x-3 mb-6">
               <User className="h-6 w-6 text-[#0072CE]" />
-              <h2 className="text-xl font-bold text-[#464B4B]">Principal Member Details </h2>
+              <h2 className="text-xl font-bold text-[#464B4B]">Principal Member Details (Holder) </h2>
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -739,7 +739,7 @@ const ProxyAppointmentFormAssignee: React.FC = () => {
                     )}
                   </div>
                   <p className="text-sm text-[#464B4B]/70">
-                    You choose specific candidates for the proxy to vote for
+                    You choose specific candidates for the proxy to vote for, meaning you provide clear instructions on exactly who should receive your vote. This approach ensures your preferences are represented accurately, even if you cannot attend the meeting. However, it also means the proxy cannot exercise any discretion or adapt to new information during the voting process.
                   </p>
                   {instructionalVotes > 0 && (
                     <div className="mt-2 px-2 py-1 bg-blue-200 text-blue-900 text-xs font-semibold rounded">
@@ -767,7 +767,7 @@ const ProxyAppointmentFormAssignee: React.FC = () => {
                     )}
                   </div>
                   <p className="text-sm text-[#464B4B]/70">
-                    Proxy decides which candidates to vote for
+                    Proxy decides which candidates to vote for, meaning the member gives full authority and trusts the proxy’s judgment. This approach allows the proxy to make decisions during the meeting based on discussions, new information, or amendments. It provides flexibility and responsiveness but requires a high level of trust, as the member relinquishes direct control over their vote.
                   </p>
                   {(totalAvailableVotes - instructionalVotes) > 0 && (
                     <div className="mt-2 px-2 py-1 bg-green-200 text-green-900 text-xs font-semibold rounded">
@@ -1002,7 +1002,7 @@ const ProxyAppointmentFormAssignee: React.FC = () => {
           </motion.div>
 
           {/* Section 3: Signature */}
-          <motion.div
+          {/* <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -1046,7 +1046,7 @@ const ProxyAppointmentFormAssignee: React.FC = () => {
                 specified AGM and will expire thereafter.
               </p>
             </div>
-          </motion.div>
+          </motion.div> */}
 
           {/* Submit Button */}
           <motion.div

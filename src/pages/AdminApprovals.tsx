@@ -89,7 +89,7 @@ const AdminApprovals: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [proxyForms, setProxyForms] = useState<ProxyForm[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedForm, setSelectedForm] = useState<ProxyForm | null>(null);
@@ -103,240 +103,108 @@ const AdminApprovals: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No authentication token found');
+        alert('Authentication required. Please log in again.');
+        navigate('/admin/login');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Loading data for tab:', activeTab);
+      console.log('Token exists:', !!token);
+
       if (activeTab === 'users') {
-        try {
-          const res = await fetch('http://localhost:3001/api/admin/users');
-          const { data } = await res.json();
-          setUsers(data || []);
-        } catch (error) {
-          console.log('API not available, loading mock data for users');
-          // Mock data for testing
-          setUsers([
-            {
-              id: '1',
-              name: 'John Doe',
-              first_name: 'John',
-              last_name: 'Doe',
-              email: 'john.doe@example.com',
-              phone: '+27 82 123 4567',
-              employee_number: 'EMP001',
-              department_name: 'Finance',
-              registration_status: 'pending',
-              active: false,
-              goodStandingIdNumber: undefined,
-              created_at: '2025-01-15T09:30:00Z',
-              avatar_url: undefined
-            },
-            {
-              id: '2',
-              name: 'Sarah Johnson',
-              first_name: 'Sarah',
-              last_name: 'Johnson',
-              email: 'sarah.johnson@example.com',
-              phone: '+27 83 234 5678',
-              employee_number: 'EMP002',
-              department_name: 'Human Resources',
-              registration_status: 'approved',
-              active: true,
-              goodStandingIdNumber: '2',
-              created_at: '2025-01-14T09:15:00Z',
-              reviewed_at: '2025-01-16T14:00:00Z',
-              avatar_url: undefined
-            },
-            {
-              id: '3',
-              name: 'David Williams',
-              first_name: 'David',
-              last_name: 'Williams',
-              email: 'david.williams@example.com',
-              phone: '+27 84 345 6789',
-              employee_number: 'EMP003',
-              department_name: 'IT',
-              registration_status: 'pending',
-              active: false,
-              goodStandingIdNumber: undefined,
-              created_at: '2025-01-16T11:45:00Z',
-              avatar_url: undefined
-            },
-            {
-              id: '4',
-              name: 'Linda Martinez',
-              first_name: 'Linda',
-              last_name: 'Martinez',
-              email: 'linda.martinez@example.com',
-              phone: '+27 85 456 7890',
-              employee_number: 'EMP004',
-              department_name: 'Marketing',
-              registration_status: 'rejected',
-              active: false,
-              rejection_reason: 'Incomplete employment verification documents',
-              reviewed_at: '2025-01-17T09:30:00Z',
-              created_at: '2025-01-15T16:00:00Z',
-              avatar_url: undefined
-            },
-            {
-              id: '5',
-              name: 'Ahmed Hassan',
-              first_name: 'Ahmed',
-              last_name: 'Hassan',
-              email: 'ahmed.hassan@example.com',
-              phone: '+27 86 567 8901',
-              employee_number: 'EMP005',
-              department_name: 'Operations',
-              registration_status: 'pending',
-              active: false,
-              goodStandingIdNumber: undefined,
-              created_at: '2025-01-17T08:00:00Z',
-              avatar_url: undefined
-            },
-            {
-              id: '6',
-              name: 'Emily Chen',
-              first_name: 'Emily',
-              last_name: 'Chen',
-              email: 'emily.chen@example.com',
-              phone: '+27 87 678 9012',
-              employee_number: 'EMP006',
-              department_name: 'Engineering',
-              registration_status: 'approved',
-              active: true,
-              goodStandingIdNumber: '6',
-              created_at: '2025-01-13T10:20:00Z',
-              reviewed_at: '2025-01-14T11:00:00Z',
-              avatar_url: undefined
-            }
-          ]);
+        console.log('Fetching pending registrations...');
+        const res = await fetch('http://localhost:3001/api/users/pending/registrations', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        console.log('Response status:', res.status);
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('API error response:', errorText);
+          throw new Error(`API error: ${res.status} - ${errorText}`);
         }
+        
+        const result = await res.json();
+        console.log('API Response:', result);
+
+        
+        // Transform backend data to frontend format
+        const transformedUsers = (result.data || []).map((user: any) => ({
+          id: user.id?.toString() || user.UserID?.toString(),
+          name: user.name || `${user.FirstName || ''} ${user.LastName || ''}`.trim(),
+          first_name: user.FirstName || user.first_name,
+          last_name: user.LastName || user.last_name,
+          email: user.Email || user.email,
+          phone: user.PhoneNumber || user.phone,
+          role_name: user.Role || user.role_name,
+          active: user.IsActive === 1 || user.active,
+          registration_status: user.registration_status || ((user.IsActive === 1 || user.active) ? 'approved' : 'pending'),
+          created_at: user.CreatedAt || user.created_at,
+          updated_at: user.UpdatedAt || user.updated_at
+        }));
+        
+        console.log('Transformed Users:', transformedUsers);
+        setUsers(transformedUsers);
       } else {
-        try {
-          const res = await fetch('http://localhost:3001/api/proxy/proxy-form');
-          const { data } = await res.json();
-          setProxyForms(data || []);
-        } catch (error) {
-          console.log('API not available, loading mock data for proxies');
-          // Mock data for proxy forms
-          setProxyForms([
-            {
-              id: '1',
-              appointment: {
-                id: 'appt-1',
-                member_title: 'Mr',
-                member_full_name: 'John Andrews',
-                member_surname: 'Smith',
-                member_membership_number: 'MEM001',
-                member_id_number: '8501015800089',
-                appointment_type: 'discretionary',
-                location_signed: 'Cape Town',
-                signed_date: '2025-01-10',
-                approval_status: 'pending',
-                created_at: '2025-01-10T09:30:00Z'
-              },
-              proxy_group: {
-                id: 'pg-1',
-                group_name: 'Executive Proxy Group',
-                principal_name: 'Sarah Jane Johnson',
-                principal_member_number: 'MEM045',
-                is_active: false
-              },
-              proxy_group_members: [
-                { id: 'pgm-1', initials: 'S.J.', full_name: 'Sarah Jane', surname: 'Johnson', membership_number: 'MEM045' },
-                { id: 'pgm-2', initials: 'M.R.', full_name: 'Michael Robert', surname: 'Brown', membership_number: 'MEM046' }
-              ]
-            },
-            {
-              id: '2',
-              appointment: {
-                id: 'appt-2',
-                member_title: 'Mrs',
-                member_full_name: 'Mary Louise',
-                member_surname: 'Williams',
-                member_membership_number: 'MEM002',
-                member_id_number: '9203128900067',
-                appointment_type: 'instructional',
-                location_signed: 'Johannesburg',
-                signed_date: '2025-01-12',
-                approval_status: 'pending',
-                created_at: '2025-01-12T14:00:00Z',
-                trustee_remuneration: 'for',
-                remuneration_policy: 'for',
-                auditors_appointment: 'for',
-                agm_motions: 'against',
-                candidate1: 'Jane Wilson',
-                candidate2: 'Robert Taylor',
-                candidate3: 'Linda Anderson'
-              },
-              proxy_group: {
-                id: 'pg-2',
-                group_name: 'Finance Committee Proxy',
-                principal_name: 'David Peter Brown',
-                principal_member_number: 'MEM067',
-                is_active: false
-              },
-              proxy_group_members: [
-                { id: 'pgm-3', initials: 'D.P.', full_name: 'David Peter', surname: 'Brown', membership_number: 'MEM067' }
-              ]
-            },
-            {
-              id: '3',
-              appointment: {
-                id: 'appt-3',
-                member_title: 'Dr',
-                member_full_name: 'Thabo Kenneth',
-                member_surname: 'Mthembu',
-                member_membership_number: 'MEM003',
-                member_id_number: '8706215600078',
-                appointment_type: 'discretionary',
-                location_signed: 'Durban',
-                signed_date: '2025-01-08',
-                approval_status: 'approved',
-                reviewed_at: '2025-01-09T10:15:00Z',
-                created_at: '2025-01-08T11:00:00Z'
-              },
-              proxy_group: {
-                id: 'pg-3',
-                group_name: 'Board Members Proxy',
-                principal_name: 'Nomsa Grace Ndlovu',
-                principal_member_number: 'MEM089',
-                is_active: true
-              },
-              proxy_group_members: [
-                { id: 'pgm-4', initials: 'N.G.', full_name: 'Nomsa Grace', surname: 'Ndlovu', membership_number: 'MEM089' },
-                { id: 'pgm-5', initials: 'P.K.', full_name: 'Peter Kenneth', surname: 'Dlamini', membership_number: 'MEM090' }
-              ]
-            },
-            {
-              id: '4',
-              appointment: {
-                id: 'appt-4',
-                member_title: 'Ms',
-                member_full_name: 'Lisa Marie',
-                member_surname: 'Anderson',
-                member_membership_number: 'MEM004',
-                member_id_number: '9105301800084',
-                appointment_type: 'discretionary',
-                location_signed: 'Pretoria',
-                signed_date: '2025-01-15',
-                approval_status: 'rejected',
-                rejection_reason: 'Proxy group not properly constituted',
-                reviewed_at: '2025-01-16T15:30:00Z',
-                created_at: '2025-01-15T13:20:00Z'
-              },
-              proxy_group: {
-                id: 'pg-4',
-                group_name: 'Regional Proxy Group',
-                principal_name: 'James Patrick Wilson',
-                principal_member_number: 'MEM101',
-                is_active: false
-              },
-              proxy_group_members: [
-                { id: 'pgm-6', initials: 'J.P.', full_name: 'James Patrick', surname: 'Wilson', membership_number: 'MEM101' }
-              ]
-            }
-          ]);
+        console.log('Fetching pending proxy assignments...');
+        const res = await fetch('http://localhost:3001/api/proxy/pending/assignments', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        
+        console.log('Response status:', res.status);
+        
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('API error response:', errorText);
+          throw new Error(`API error: ${res.status} - ${errorText}`);
         }
+        
+        const result = await res.json();
+        console.log('API Response:', result);
+        
+        // Transform backend data to frontend format
+        const transformedProxies = (result.data || []).map((proxy: any) => ({
+          id: proxy.id?.toString(),
+          appointment: {
+            id: proxy.appointment?.id || proxy.id?.toString(),
+            member_title: '',
+            member_full_name: proxy.appointment?.member_full_name || '',
+            member_surname: '',
+            member_membership_number: '',
+            member_id_number: '',
+            appointment_type: proxy.appointment?.appointment_type || 'discretionary',
+            location_signed: '',
+            signed_date: proxy.appointment?.created_at || new Date().toISOString(),
+            approval_status: proxy.appointment?.approval_status || 'pending',
+            reviewed_at: proxy.appointment?.reviewed_at,
+            rejection_reason: proxy.appointment?.rejection_reason,
+            created_at: proxy.appointment?.created_at || new Date().toISOString()
+          },
+          proxy_group: {
+            id: proxy.proxy_assignment?.proxy_user_id?.toString() || '',
+            group_name: proxy.appointment?.proxy_holder_name || '',
+            principal_name: proxy.appointment?.proxy_holder_name || '',
+            principal_member_number: '',
+            is_active: proxy.appointment?.approval_status === 'approved'
+          },
+          proxy_group_members: []
+        }));
+        
+        console.log('Transformed Proxies:', transformedProxies);
+        setProxyForms(transformedProxies);
       }
     } catch (error) {
       console.error('Error loading data:', error);
+      alert(`Failed to load data: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -347,20 +215,28 @@ const AdminApprovals: React.FC = () => {
 
     setActionLoading(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/approval/users/${user.id}/approve`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      const response = await fetch(`http://localhost:3001/api/users/${user.id}/approve`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
       const result = await response.json();
       if (result.success) {
-        setUsers(prev =>
-          prev.map(u =>
-            u.id === user.id
-              ? { ...u, registration_status: 'approved', reviewed_at: new Date().toISOString(), active: true }
-              : u
-          )
-        );
+        // Update user status to approved
+        setUsers(prev => prev.map(u => 
+          u.id === user.id 
+            ? { ...u, active: true, registration_status: 'approved' }
+            : u
+        ));
         alert('User approved successfully!');
         setSelectedUser(null);
       } else {
@@ -414,19 +290,38 @@ const AdminApprovals: React.FC = () => {
 
     setActionLoading(true);
     try {
-      // Implement rejection API call here
-      setUsers(prev =>
-        prev.map(u =>
-          u.id === user.id
-            ? { ...u, registration_status: 'rejected', rejection_reason: rejectionReason, reviewed_at: new Date().toISOString() }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      const response = await fetch(`http://localhost:3001/api/users/${user.id}/reject`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ reason: rejectionReason })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        // Update user status to rejected
+        setUsers(prev => prev.map(u => 
+          u.id === user.id 
+            ? { ...u, registration_status: 'rejected', rejection_reason: rejectionReason }
             : u
-        )
-      );
-      alert('User registration rejected');
-      setSelectedUser(null);
-      setRejectionReason('');
+        ));
+        alert('User registration rejected');
+        setSelectedUser(null);
+        setRejectionReason('');
+      } else {
+        alert('Failed to reject user: ' + result.message);
+      }
     } catch (error) {
       console.error('Error rejecting user:', error);
+      alert('Something went wrong while rejecting the user.');
     } finally {
       setActionLoading(false);
     }
@@ -437,29 +332,37 @@ const AdminApprovals: React.FC = () => {
 
     setActionLoading(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/proxy/proxy-group/${form.proxy_group?.id}/activate`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      const proxyId = form.id;
+      const res = await fetch(`http://localhost:3001/api/proxy/${proxyId}/approve`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
-      if (!res.ok) throw new Error('Failed to activate proxy group');
-
-      setProxyForms(prev =>
-        prev.map(f =>
-          f.appointment.id === form.appointment.id
-            ? {
-                ...f,
-                appointment: { ...f.appointment, approval_status: 'approved', reviewed_at: new Date().toISOString() },
-                proxy_group: f.proxy_group ? { ...f.proxy_group, is_active: true } : undefined
-              }
+      const result = await res.json();
+      if (result.success) {
+        // Update proxy status to approved
+        setProxyForms(prev => prev.map(f => 
+          f.id === form.id 
+            ? { ...f, appointment: { ...f.appointment, approval_status: 'approved' } }
             : f
-        )
-      );
-      alert('Proxy assignment approved!');
-      setSelectedForm(null);
+        ));
+        alert('Proxy assignment approved successfully!');
+        setSelectedForm(null);
+      } else {
+        alert('Failed to approve proxy: ' + result.message);
+      }
     } catch (error) {
       console.error('Error approving proxy:', error);
-      alert('Failed to approve proxy assignment');
+      alert('Something went wrong while approving the proxy.');
     } finally {
       setActionLoading(false);
     }
@@ -470,29 +373,37 @@ const AdminApprovals: React.FC = () => {
 
     setActionLoading(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/proxy/proxy-group/${form.proxy_group?.id}/deactivate`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication token not found. Please log in again.');
+        return;
+      }
+
+      const proxyId = form.id;
+      const res = await fetch(`http://localhost:3001/api/proxy/${proxyId}/reject`, {
+        method: 'DELETE',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
       });
 
-      if (!res.ok) throw new Error('Failed to deactivate proxy group');
-
-      setProxyForms(prev =>
-        prev.map(f =>
-          f.appointment.id === form.appointment.id
-            ? {
-                ...f,
-                appointment: { ...f.appointment, approval_status: 'rejected', reviewed_at: new Date().toISOString() },
-                proxy_group: f.proxy_group ? { ...f.proxy_group, is_active: false } : undefined
-              }
+      const result = await res.json();
+      if (result.success) {
+        // Update proxy status to rejected
+        setProxyForms(prev => prev.map(f => 
+          f.id === form.id 
+            ? { ...f, appointment: { ...f.appointment, approval_status: 'rejected' } }
             : f
-        )
-      );
-      alert('Proxy assignment rejected');
-      setSelectedForm(null);
+        ));
+        alert('Proxy assignment rejected');
+        setSelectedForm(null);
+      } else {
+        alert('Failed to reject proxy: ' + result.message);
+      }
     } catch (error) {
       console.error('Error rejecting proxy:', error);
-      alert('Failed to reject proxy assignment');
+      alert('Something went wrong while rejecting the proxy.');
     } finally {
       setActionLoading(false);
     }
@@ -503,6 +414,7 @@ const AdminApprovals: React.FC = () => {
     .filter(u =>
       `${u.name} ${u.email}`.toLowerCase().includes(searchTerm.toLowerCase())
     );
+
 
   const filteredProxyForms = proxyForms
     .filter(f => filter === 'all' || f.appointment.approval_status === filter)
@@ -546,6 +458,8 @@ const AdminApprovals: React.FC = () => {
     pendingProxies: proxyForms.filter(f => f.appointment.approval_status === 'pending').length,
     approvedProxies: proxyForms.filter(f => f.appointment.approval_status === 'approved').length
   };
+
+  console.log('Rendered AdminApprovals with',  users);
 
   return (
     <>

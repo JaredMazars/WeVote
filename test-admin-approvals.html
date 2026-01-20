@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WeVote - Manual Testing Guide</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 20px;
+            background: linear-gradient(to br, #f5f5f5, #e0e0e0);
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #0072CE;
+            border-bottom: 3px solid #171C8F;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #171C8F;
+            margin-top: 30px;
+        }
+        .test-card {
+            background: #f8f9fa;
+            border-left: 4px solid #0072CE;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 4px;
+        }
+        .test-card h3 {
+            margin-top: 0;
+            color: #0072CE;
+        }
+        .test-data {
+            background: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .status.pass { background: #d4edda; color: #155724; }
+        .status.pending { background: #fff3cd; color: #856404; }
+        .status.fail { background: #f8d7da; color: #721c24; }
+        button {
+            background: linear-gradient(to right, #0072CE, #171C8F);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        .credentials {
+            background: #e3f2fd;
+            border: 2px solid #2196F3;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .link {
+            color: #0072CE;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background: linear-gradient(to right, #0072CE, #171C8F);
+            color: white;
+        }
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        .api-test {
+            background: #f1f3f5;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        input {
+            padding: 8px;
+            margin: 5px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            width: 300px;
+        }
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        .checklist {
+            list-style: none;
+            padding: 0;
+        }
+        .checklist li {
+            padding: 8px;
+            margin: 5px 0;
+            background: #fff;
+            border-radius: 4px;
+            border-left: 3px solid #0072CE;
+        }
+        .checklist li:before {
+            content: "☐ ";
+            font-size: 20px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 WeVote - Manual Testing Guide</h1>
+    
+    <div class="container">
+        <h2>Quick Links</h2>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <a href="http://localhost:5173" target="_blank" class="link">
+                <button>Open Frontend</button>
+            </a>
+            <a href="http://localhost:5173/register" target="_blank" class="link">
+                <button>Employee Registration</button>
+            </a>
+            <a href="http://localhost:5173/admin/login" target="_blank" class="link">
+                <button>Admin Login</button>
+            </a>
+            <a href="http://localhost:5173/admin/approvals" target="_blank" class="link">
+                <button>Admin Approvals</button>
+            </a>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🔐 Test Credentials</h2>
+        <div class="credentials">
+            <h3>Admin Account</h3>
+            <strong>Email:</strong> admin@wevote.com<br>
+            <strong>Password:</strong> Admin123!
+        </div>
+        <div class="credentials">
+            <h3>Super Admin Account</h3>
+            <strong>Email:</strong> superadmin@wevote.com<br>
+            <strong>Password:</strong> SuperAdmin123!
+        </div>
+        <div class="credentials" style="background: #fff3cd; border-color: #ffc107;">
+            <h3>Approved Test Users (Regular Users)</h3>
+            <strong>Email:</strong> robertj1768812663559@forvismazars.com<br>
+            <strong>Name:</strong> Robert Johnson<br>
+            <strong>Password:</strong> TestUser@123<br>
+            <br>
+            <strong>Email:</strong> test@forvismazars.com<br>
+            <strong>Name:</strong> Forvis M<br>
+            <strong>Password:</strong> TestUser@123<br>
+            <br>
+            <em>Note: Password set to TestUser@123 for all approved test users</em>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📋 Phase 1: Registration Flow Tests</h2>
+        
+        <div class="test-card">
+            <h3>Test 1.1: Valid Registration with Digital Proxy</h3>
+            <p><span class="status pass">API: PASSED ✅</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Navigate to: <a href="http://localhost:5173/register" target="_blank" class="link">Registration Page</a></li>
+                <li>Click "Show Sensitive Data" toggle</li>
+                <li>Fill in the form with test data below</li>
+                <li>Select "Fill Digitally" on step 3</li>
+                <li>Complete registration</li>
+            </ol>
+            <div class="test-data">
+                <strong>Test Data:</strong><br>
+                Title: Mr<br>
+                First Name: TestUser<br>
+                Last Name: Digital<br>
+                Email: testdigital<strong>[timestamp]</strong>@forvismazars.com<br>
+                Phone: 0821234567<br>
+                ID Type: South African ID<br>
+                ID Number: 9001015009087<br>
+                Membership #: MEM2024001<br>
+                Date of Birth: 1990-01-01<br>
+                <br>
+                Address: 123 Test Street<br>
+                City: Johannesburg<br>
+                Province: Gauteng<br>
+                Postal Code: 2000<br>
+                Country: South Africa
+            </div>
+            <p><strong>Expected Result:</strong> Success message, redirect to login</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 1.4: Validation - Missing Required Fields</h3>
+            <p><span class="status pending">MANUAL TEST</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Go to registration page</li>
+                <li>Click "Next" without filling any fields</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Red error messages appear for all required fields</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 1.5: Validation - Invalid Email</h3>
+            <p><span class="status pending">MANUAL TEST</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Enter email: "invalid-email"</li>
+                <li>Try to proceed</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Error: "Please enter a valid email address"</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 1.6: Validation - Invalid Phone</h3>
+            <p><span class="status pending">MANUAL TEST</span></p>
+            <p><strong>Test Data:</strong> 123456789 (9 digits)</p>
+            <p><strong>Expected Result:</strong> Error: "Phone number must be 10 digits, start with 0..."</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 1.7: Validation - Invalid SA ID</h3>
+            <p><span class="status pending">MANUAL TEST</span></p>
+            <p><strong>Test Data:</strong> 123456789012 (12 digits)</p>
+            <p><strong>Expected Result:</strong> Error: "South African ID must be exactly 13 digits"</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📋 Phase 2: Admin Approval Tests</h2>
+        
+        <div class="test-card">
+            <h3>Test 2.1: View Pending Registrations</h3>
+            <p><span class="status pass">API: PASSED ✅</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Login as admin (credentials above)</li>
+                <li>Navigate to Admin Dashboard</li>
+                <li>Click "Approvals"</li>
+                <li>Check "User Registrations" tab</li>
+            </ol>
+            <p><strong>Expected Result:</strong> See list of pending users with counters</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 2.2: Approve User</h3>
+            <p><span class="status pass">API: PASSED ✅</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>On approvals page, click "View" on a pending user</li>
+                <li>Click "Approve Registration"</li>
+                <li>Confirm</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Success message, user removed from pending list</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 2.8: Filter Functionality</h3>
+            <p><span class="status pending">MANUAL TEST</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Change filter dropdown from "Pending" to "All"</li>
+                <li>Try "Approved" and "Rejected"</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Table updates to show only matching records</p>
+        </div>
+
+        <div class="test-card">
+            <h3>Test 2.9: Search Functionality</h3>
+            <p><span class="status pending">MANUAL TEST</span></p>
+            <p><strong>Steps:</strong></p>
+            <ol>
+                <li>Type "test" in search box</li>
+                <li>Verify results filter</li>
+            </ol>
+            <p><strong>Expected Result:</strong> Only matching records display</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🔧 API Testing Section</h2>
+        <div class="api-test">
+            <h3>Test Backend APIs Directly</h3>
+            <div id="api-results"></div>
+            
+            <h4>1. Login</h4>
+            <input type="email" id="email" placeholder="Email" value="admin@wevote.com">
+            <input type="password" id="password" placeholder="Password" value="Admin123!">
+            <button onclick="testLogin()">Test Login</button>
+            
+            <h4>2. Fetch Pending Users</h4>
+            <button onclick="testPendingUsers()">Fetch Pending Users</button>
+            
+            <h4>3. Fetch Pending Proxies</h4>
+            <button onclick="testPendingProxies()">Fetch Pending Proxies</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>✅ Test Execution Checklist</h2>
+        <ul class="checklist">
+            <li>Backend server running on port 3001</li>
+            <li>Frontend server running on port 5173</li>
+            <li>Admin credentials confirmed working</li>
+            <li>Registration flow tested end-to-end</li>
+            <li>All validation rules verified</li>
+            <li>Approval workflow tested</li>
+            <li>Proxy assignment tested</li>
+            <li>Filter and search tested</li>
+            <li>Error handling verified</li>
+            <li>Browser console checked for errors</li>
+        </ul>
+    </div>
+
+    <div class="container">
+        <h2>📊 Automated Test Results</h2>
+        <p><strong>Latest API Test Results:</strong></p>
+        <table>
+            <tr>
+                <th>Test Case</th>
+                <th>Status</th>
+                <th>Details</th>
+            </tr>
+            <tr>
+                <td>1.1 - Registration (Digital Proxy)</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>User created successfully</td>
+            </tr>
+            <tr>
+                <td>1.2 - Registration (Manual Proxy)</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>User created successfully</td>
+            </tr>
+            <tr>
+                <td>1.3 - Registration (Abstain)</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>User created successfully</td>
+            </tr>
+            <tr>
+                <td>1.10 - Duplicate Email Prevention</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>Correctly rejected</td>
+            </tr>
+            <tr>
+                <td>2.1 - View Pending Registrations</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>Found 9 pending users</td>
+            </tr>
+            <tr>
+                <td>2.2 - Approve User</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>User approved successfully</td>
+            </tr>
+            <tr>
+                <td>2.5 - View Pending Proxies</td>
+                <td><span class="status pass">PASS</span></td>
+                <td>Found 4 pending proxies</td>
+            </tr>
+        </table>
+        <p><strong>Overall API Success Rate: 100%</strong> (8/8 tests passed)</p>
+    </div>
+
+    <script>
+        const BASE_URL = 'http://localhost:3001/api';
+        let token = null;
+
+        function showResult(message, success = true) {
+            const resultsDiv = document.getElementById('api-results');
+            const color = success ? '#d4edda' : '#f8d7da';
+            const textColor = success ? '#155724' : '#721c24';
+            resultsDiv.innerHTML = `<div style="background: ${color}; color: ${textColor}; padding: 15px; border-radius: 4px; margin: 10px 0;">${message}</div>` + resultsDiv.innerHTML;
+        }
+
+        async function testLogin() {
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const response = await fetch(`${BASE_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    token = data.token;
+                    localStorage.setItem('token', token);
+                    showResult(`✅ Login successful! Role: ${data.user.role}`, true);
+                } else {
+                    showResult(`❌ Login failed: ${data.message}`, false);
+                }
+            } catch (error) {
+                showResult(`❌ Error: ${error.message}`, false);
+            }
+        }
+
+        async function testPendingUsers() {
+            if (!token) {
+                showResult('❌ Please login first', false);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${BASE_URL}/users/pending/registrations`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult(`✅ Found ${data.count} pending users`, true);
+                } else {
+                    showResult(`❌ Failed: ${data.message}`, false);
+                }
+            } catch (error) {
+                showResult(`❌ Error: ${error.message}`, false);
+            }
+        }
+
+        async function testPendingProxies() {
+            if (!token) {
+                showResult('❌ Please login first', false);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${BASE_URL}/proxy/pending/assignments`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showResult(`✅ Found ${data.count} pending proxies`, true);
+                } else {
+                    showResult(`❌ Failed: ${data.message}`, false);
+                }
+            } catch (error) {
+                showResult(`❌ Error: ${error.message}`, false);
+            }
+        }
+
+        // Auto-load token from localStorage
+        window.onload = function() {
+            const savedToken = localStorage.getItem('token');
+            if (savedToken) {
+                token = savedToken;
+                showResult('ℹ️ Token loaded from localStorage', true);
+            }
+        };
+    </script>
+</body>
+</html>

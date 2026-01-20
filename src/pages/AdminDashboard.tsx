@@ -744,8 +744,8 @@ const AdminDashboard: React.FC = () => {
   };
 
   const tabs = [
-    { id: 'users', label: 'Users', icon: Users, count: users.length },
-    { id: 'candidates', label: 'Candidates', icon: UserCheck, count: candidates.length },
+    { id: 'users', label: 'Members', icon: Users, count: users.length },
+    { id: 'candidates', label: 'Nominees', icon: UserCheck, count: candidates.length },
     { id: 'resolutions', label: 'Resolutions', icon: FileText, count: resolutions.length },
     { id: 'proxies', label: 'Proxy Groups', icon: Shield, count: proxyGroups.length },
     { id: 'votes', label: 'Vote Logs', icon: Vote, count: voteLogs.length },

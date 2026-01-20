@@ -1,0 +1,233 @@
+/* PDF Styling for WeVote Audit Report */
+
+@page {
+  margin: 2cm;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: 11pt;
+  line-height: 1.6;
+  color: #333;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* Headers */
+h1 {
+  color: #0072CE;
+  font-size: 24pt;
+  font-weight: bold;
+  margin-top: 30px;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid #171C8F;
+  page-break-after: avoid;
+}
+
+h2 {
+  color: #171C8F;
+  font-size: 18pt;
+  font-weight: bold;
+  margin-top: 25px;
+  margin-bottom: 15px;
+  page-break-after: avoid;
+}
+
+h3 {
+  color: #0072CE;
+  font-size: 14pt;
+  font-weight: bold;
+  margin-top: 20px;
+  margin-bottom: 12px;
+  page-break-after: avoid;
+}
+
+h4 {
+  color: #464B4B;
+  font-size: 12pt;
+  font-weight: bold;
+  margin-top: 15px;
+  margin-bottom: 10px;
+  page-break-after: avoid;
+}
+
+/* Paragraphs */
+p {
+  margin-bottom: 10px;
+  text-align: justify;
+}
+
+/* Lists */
+ul, ol {
+  margin-left: 20px;
+  margin-bottom: 15px;
+}
+
+li {
+  margin-bottom: 5px;
+}
+
+/* Tables */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 15px 0;
+  font-size: 10pt;
+  page-break-inside: auto;
+}
+
+table thead {
+  background-color: #0072CE;
+  color: white;
+  font-weight: bold;
+}
+
+table th {
+  padding: 10px;
+  text-align: left;
+  border: 1px solid #ddd;
+}
+
+table td {
+  padding: 8px;
+  border: 1px solid #ddd;
+}
+
+table tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+table tr {
+  page-break-inside: avoid;
+  page-break-after: auto;
+}
+
+/* Code blocks */
+code {
+  background-color: #f4f4f4;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 9pt;
+  color: #c7254e;
+}
+
+pre {
+  background-color: #f4f4f4;
+  padding: 15px;
+  border-left: 4px solid #0072CE;
+  overflow-x: auto;
+  margin: 15px 0;
+  page-break-inside: avoid;
+}
+
+pre code {
+  background-color: transparent;
+  padding: 0;
+  color: #333;
+  font-size: 9pt;
+}
+
+/* Blockquotes */
+blockquote {
+  border-left: 4px solid #171C8F;
+  padding-left: 15px;
+  margin: 15px 0;
+  color: #666;
+  font-style: italic;
+}
+
+/* Links */
+a {
+  color: #0072CE;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Horizontal rules */
+hr {
+  border: none;
+  border-top: 2px solid #ddd;
+  margin: 30px 0;
+}
+
+/* Strong and emphasis */
+strong {
+  font-weight: bold;
+  color: #171C8F;
+}
+
+em {
+  font-style: italic;
+}
+
+/* Page breaks */
+.page-break {
+  page-break-before: always;
+}
+
+/* Severity badges (emulated with text) */
+h4:contains("CRITICAL") {
+  color: #d32f2f;
+}
+
+h4:contains("HIGH") {
+  color: #f57c00;
+}
+
+h4:contains("MEDIUM") {
+  color: #fbc02d;
+}
+
+h4:contains("LOW") {
+  color: #388e3c;
+}
+
+/* Executive summary boxes */
+table[border="1"] {
+  border: 2px solid #0072CE;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+/* Footer */
+@page {
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-size: 9pt;
+    color: #666;
+  }
+}
+
+/* Avoid orphans and widows */
+p, li {
+  orphans: 3;
+  widows: 3;
+}
+
+/* Print optimizations */
+@media print {
+  body {
+    font-size: 10pt;
+  }
+  
+  h1 {
+    font-size: 20pt;
+  }
+  
+  h2 {
+    font-size: 16pt;
+  }
+  
+  h3 {
+    font-size: 13pt;
+  }
+  
+  a {
+    color: #000;
+    text-decoration: underline;
+  }
+}

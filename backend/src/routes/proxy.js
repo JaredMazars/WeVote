@@ -34,7 +34,19 @@ router.post('/appoint', [
     throw new AppError('Unauthorized to create proxy assignment for this user', 403);
   }
 
-  const proxy = await Proxy.create(req.body);
+  // Map API field names to model field names
+  const proxyData = {
+    principalUserId: req.body.principalUserId,
+    proxyUserId: req.body.proxyHolderId, // API uses proxyHolderId, DB/model uses proxyUserId
+    sessionId: req.body.sessionId,
+    proxyType: req.body.assignmentType || 'general',
+    endDate: req.body.validUntil,
+    maxVotesAllowed: req.body.maxVotesAllowed,
+    canDelegate: req.body.canDelegate,
+    notes: req.body.notes
+  };
+
+  const proxy = await Proxy.create(proxyData);
 
   logger.info(`Proxy assignment created: Principal ${req.body.principalUserId} -> Proxy ${req.body.proxyHolderId}`);
 
@@ -54,7 +66,7 @@ router.post('/instructional', [
   body('instructions').isArray().withMessage('Instructions array is required'),
   body('instructions.*.type').isIn(['candidate', 'resolution']),
   body('instructions.*.targetId').isInt(),
-  body('instructions.*.voteChoice').notEmpty(),
+  body('instructions.*.votesAllocated').isInt({ min: 1 }),
   validate
 ], asyncHandler(async (req, res) => {
   // Users can only assign their own proxy
@@ -62,7 +74,15 @@ router.post('/instructional', [
     throw new AppError('Unauthorized to create instructional proxy', 403);
   }
 
-  const result = await Proxy.createInstructional(req.body);
+  // Map API field names to model field names
+  const instructionalData = {
+    principalUserId: req.body.principalUserId,
+    proxyUserId: req.body.proxyHolderId, // API uses proxyHolderId, DB/model uses proxyUserId
+    sessionId: req.body.sessionId,
+    instructions: req.body.instructions
+  };
+
+  const result = await Proxy.createInstructional(instructionalData);
 
   logger.info(`Instructional proxy created: Principal ${req.body.principalUserId} -> Proxy ${req.body.proxyHolderId}`);
 
@@ -270,6 +290,127 @@ router.get('/assignments', [
     count: result.recordset.length
   });
 }));
+
+// @route   GET /api/proxy/pending/assignments
+// @desc    Get all proxy assignments (for admin approval interface)
+// @access  Private (Admin/Super Admin)
+router.get('/pending/assignments', [
+  authorizeRoles('super_admin', 'admin'),
+  asyncHandler(async (req, res) => {
+    const { executeQuery } = require('../config/database');
+
+    const result = await executeQuery(`
+      SELECT 
+        pa.ProxyID as id,
+        pa.SessionID,
+        pa.PrincipalUserID,
+        principal.FirstName + ' ' + principal.LastName as principal_name,
+        principal.Email as principal_email,
+        pa.ProxyUserID,
+        proxyUser.FirstName + ' ' + proxyUser.LastName as proxy_name,
+        proxyUser.Email as proxy_email,
+        pa.ProxyType as appointment_type,
+        pa.StartDate as start_date,
+        pa.IsActive,
+        CASE 
+          WHEN pa.IsActive = 1 THEN 'approved'
+          WHEN pa.IsActive = 0 THEN 'pending'
+          ELSE 'rejected'
+        END as approval_status,
+        pa.CreatedAt as created_at,
+        s.Title as session_title
+      FROM ProxyAssignments pa
+      LEFT JOIN Users principal ON pa.PrincipalUserID = principal.UserID
+      LEFT JOIN Users proxyUser ON pa.ProxyUserID = proxyUser.UserID
+      LEFT JOIN AGMSessions s ON pa.SessionID = s.SessionID
+      ORDER BY pa.CreatedAt DESC
+    `);
+
+    // Transform to match frontend format
+    const transformedData = result.recordset.map(proxy => ({
+      id: proxy.id?.toString(),
+      appointment: {
+        id: `appt-${proxy.id}`,
+        member_full_name: proxy.principal_name,
+        member_email: proxy.principal_email,
+        proxy_holder_name: proxy.proxy_name,
+        proxy_holder_email: proxy.proxy_email,
+        appointment_type: proxy.appointment_type || 'discretionary',
+        approval_status: proxy.approval_status,
+        created_at: proxy.created_at,
+        session_title: proxy.session_title
+      },
+      proxy_assignment: {
+        id: proxy.id,
+        principal_user_id: proxy.PrincipalUserID,
+        proxy_user_id: proxy.ProxyUserID,
+        session_id: proxy.SessionID,
+        start_date: proxy.start_date
+      }
+    }));
+
+    res.json({
+      success: true,
+      data: transformedData,
+      count: transformedData.length
+    });
+  })
+]);
+
+// @route   PUT /api/proxy/:id/approve
+// @desc    Approve a pending proxy assignment
+// @access  Private (Admin/Super Admin)
+router.put('/:id/approve', [
+  param('id').isInt().withMessage('Valid proxy ID required'),
+  validate,
+  authorizeRoles('admin', 'super_admin'),
+  asyncHandler(async (req, res) => {
+    const proxyId = parseInt(req.params.id);
+    const sql = require('mssql');
+    const { getPool } = require('../config/database');
+    const pool = await getPool();
+
+    // Update proxy to active
+    await pool.request()
+      .input('proxyId', sql.Int, proxyId)
+      .query`
+        UPDATE ProxyAssignments 
+        SET IsActive = 1,
+            UpdatedAt = GETDATE()
+        WHERE ProxyID = @proxyId
+      `;
+
+    res.json({
+      success: true,
+      message: 'Proxy assignment approved successfully'
+    });
+  })
+]);
+
+// @route   DELETE /api/proxy/:id/reject
+// @desc    Reject and delete a pending proxy assignment
+// @access  Private (Admin/Super Admin)
+router.delete('/:id/reject', [
+  param('id').isInt().withMessage('Valid proxy ID required'),
+  validate,
+  authorizeRoles('admin', 'super_admin'),
+  asyncHandler(async (req, res) => {
+    const proxyId = parseInt(req.params.id);
+    const sql = require('mssql');
+    const { getPool } = require('../config/database');
+    const pool = await getPool();
+
+    // Delete the rejected proxy assignment
+    await pool.request()
+      .input('proxyId', sql.Int, proxyId)
+      .query`DELETE FROM ProxyAssignments WHERE ProxyID = @proxyId`;
+
+    res.json({
+      success: true,
+      message: 'Proxy assignment rejected and removed'
+    });
+  })
+]);
 
 // @route   POST /api/proxy/:id/revoke
 // @desc    Revoke proxy assignment

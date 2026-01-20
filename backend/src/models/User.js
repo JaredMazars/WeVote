@@ -61,7 +61,7 @@ class User {
     try {
       const { 
         organizationId, email, password, firstName, lastName, 
-        role = 'user', phoneNumber 
+        role = 'voter', phoneNumber 
       } = userData;
 
       // Hash password
@@ -101,6 +101,49 @@ class User {
       return result.recordset[0];
     } catch (err) {
       logger.error('Error creating user:', err);
+      throw err;
+    }
+  }
+
+  // Create pending user (for registration - requires admin approval)
+  static async createPending(userData) {
+    try {
+      const { 
+        organizationId, email, firstName, lastName, 
+        role = 'voter', phoneNumber 
+      } = userData;
+
+      // Generate a temporary placeholder password (will be replaced on approval)
+      const tempPassword = 'PendingApproval' + Date.now();
+      const salt = await bcrypt.genSalt(parseInt(process.env.BCRYPT_ROUNDS) || 12);
+      const passwordHash = await bcrypt.hash(tempPassword, salt);
+
+      const query = `
+        INSERT INTO Users (
+          OrganizationID, Email, PasswordHash, Salt, FirstName, LastName,
+          Role, PhoneNumber, IsActive, IsEmailVerified, RequiresPasswordChange
+        )
+        OUTPUT INSERTED.*
+        VALUES (
+          @organizationId, @email, @passwordHash, @salt, @firstName, @lastName,
+          @role, @phoneNumber, 0, 0, 1
+        )
+      `;
+
+      const result = await executeQuery(query, {
+        organizationId,
+        email,
+        passwordHash,
+        salt,
+        firstName,
+        lastName,
+        role,
+        phoneNumber: phoneNumber || null
+      });
+
+      return result.recordset[0];
+    } catch (err) {
+      logger.error('Error creating pending user:', err);
       throw err;
     }
   }
@@ -145,14 +188,19 @@ class User {
         throw new Error('No valid fields to update');
       }
 
-      const query = `
+      const updateQuery = `
         UPDATE Users
         SET ${setClauses.join(', ')}, UpdatedAt = GETDATE()
-        OUTPUT INSERTED.*
         WHERE UserID = @userId
       `;
 
-      const result = await executeQuery(query, params);
+      await executeQuery(updateQuery, params);
+      
+      // Fetch updated user separately to avoid trigger conflict
+      const selectQuery = `
+        SELECT * FROM Users WHERE UserID = @userId
+      `;
+      const result = await executeQuery(selectQuery, { userId });
       return result.recordset[0];
     } catch (err) {
       logger.error('Error updating user profile:', err);
