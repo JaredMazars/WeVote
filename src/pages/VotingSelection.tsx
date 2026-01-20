@@ -35,7 +35,7 @@ const VotingSelection: React.FC = () => {
       title: 'Nominee Voting',
       description: 'Vote for nominees or cast proxy votes',
       icon: Users,
-      gradient: 'from-blue-500 to-cyan-500',
+      gradient: 'from-blue-500 to-blue-500',
       path: '/voting/candidates'
     },
     {
