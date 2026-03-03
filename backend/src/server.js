@@ -124,12 +124,25 @@ const server = app.listen(PORT, () => {
   logger.info(`🔐 API endpoint: http://localhost:${PORT}/api`);
 });
 
+// Handle server-level errors (e.g. EADDRINUSE)
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    logger.error(`Port ${PORT} is already in use. Please stop the other process and restart.`);
+  } else {
+    logger.error('Server error:', err.message);
+  }
+  process.exit(1);
+});
+
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {
-  logger.error('UNHANDLED REJECTION! 💥 Shutting down...', err);
-  server.close(() => {
-    process.exit(1);
-  });
+  logger.error('Unhandled promise rejection (server kept alive):', err.message || err);
+  // Don't exit - keep server running even if DB temporarily unavailable
+});
+
+// Handle uncaught exceptions (log but keep alive unless fatal)
+process.on('uncaughtException', (err) => {
+  logger.error('Uncaught exception (server kept alive):', err.message || err);
 });
 
 // Handle SIGTERM

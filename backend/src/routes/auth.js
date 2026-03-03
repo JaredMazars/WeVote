@@ -9,6 +9,7 @@ const { body, param } = require('express-validator');
 const User = require('../models/User');
 const { validate } = require('../middleware/validator');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
+const { authenticateToken } = require('../middleware/auth');
 const logger = require('../config/logger');
 
 // Generate JWT token
@@ -22,6 +23,15 @@ const generateToken = (user) => {
     },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
+  );
+};
+
+// Generate Refresh Token (longer-lived)
+const generateRefreshToken = (user) => {
+  return jwt.sign(
+    { userId: user.UserID, type: 'refresh' },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d' }
   );
 };
 
@@ -73,6 +83,7 @@ router.post('/login', [
 
   // Generate token
   const token = generateToken(user);
+  const refreshToken = generateRefreshToken(user);
 
   // Remove sensitive data
   delete user.PasswordHash;
@@ -83,6 +94,7 @@ router.post('/login', [
   res.json({
     message: 'Login successful',
     token,
+    refreshToken,
     user: {
       userId: user.UserID,
       email: user.Email,
@@ -341,8 +353,8 @@ router.post('/first-login-password-change', [
 
 // @route   PUT /api/auth/update-password/:userId
 // @desc    Update password (for temp password flow)
-// @access  Public (used during first login)
-router.put('/update-password/:userId', [
+// @access  Private - requires authentication
+router.put('/update-password/:userId', authenticateToken, [
   param('userId').notEmpty().withMessage('User ID required'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   validate
@@ -485,7 +497,7 @@ router.post('/reset-password', [
   }
 
   // Verify temporary password
-  const isValid = await User.verifyPassword(email, tempPassword);
+  const isValid = await User.verifyPassword(tempPassword, user.PasswordHash);
   
   if (!isValid) {
     throw new AppError('Invalid temporary password', 401);
@@ -525,6 +537,42 @@ router.get('/me', asyncHandler(async (req, res) => {
 
   res.json({
     user
+  });
+}));
+
+// @route   POST /api/auth/refresh-token
+// @desc    Get new access token using refresh token
+// @access  Public
+router.post('/refresh-token', [
+  body('refreshToken').notEmpty().withMessage('Refresh token is required'),
+  validate
+], asyncHandler(async (req, res) => {
+  const { refreshToken } = req.body;
+
+  let payload;
+  try {
+    payload = jwt.verify(refreshToken, process.env.JWT_SECRET);
+  } catch (err) {
+    throw new AppError('Invalid or expired refresh token', 401);
+  }
+
+  if (payload.type !== 'refresh') {
+    throw new AppError('Invalid token type', 401);
+  }
+
+  const user = await User.findById(payload.userId);
+  if (!user || !user.IsActive) {
+    throw new AppError('User not found or deactivated', 401);
+  }
+
+  const newToken = generateToken(user);
+  const newRefreshToken = generateRefreshToken(user);
+
+  logger.info(`Token refreshed for user: ${user.Email}`);
+
+  res.json({
+    token: newToken,
+    refreshToken: newRefreshToken,
   });
 }));
 

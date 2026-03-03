@@ -18,8 +18,6 @@ import {
   TrendingUp,
   X
 } from 'lucide-react';
-import { calculateVoteWeight, checkVoteEligibility, getMockUser, castVote } from '../utils/proxyVoting';
-import { blockchainService } from '../services/blockchain';
 
 interface Candidate {
   id: string;
@@ -32,75 +30,13 @@ interface Candidate {
   achievements?: string[];
 }
 
-// Mock candidates data
-const mockCandidates: Candidate[] = [
-  {
-    id: '1',
-    name: 'Sarah Johnson',
-    position: 'Senior Software Engineer',
-    department: 'Engineering',
-    bio: 'Sarah has been with the company for 5 years, leading multiple successful projects and mentoring junior developers. Her expertise in cloud architecture and agile methodologies has been instrumental in our digital transformation.',
-    image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&h=400&fit=crop&crop=faces',
-    skills: ['Cloud Architecture', 'React', 'Leadership', 'Agile'],
-    achievements: ['Employee of the Year 2024', 'Led 3 major projects', 'Mentored 10+ developers']
-  },
-  {
-    id: '2',
-    name: 'Michael Chen',
-    position: 'Marketing Director',
-    department: 'Marketing',
-    bio: 'Michael brings 8 years of marketing experience, specializing in digital campaigns and brand strategy. He has consistently delivered results exceeding targets and built strong relationships with key stakeholders.',
-    image: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop&crop=faces',
-    skills: ['Digital Marketing', 'Brand Strategy', 'Analytics', 'Team Management'],
-    achievements: ['150% ROI on campaigns', 'Grew social media by 300%', 'Award-winning campaigns']
-  },
-  {
-    id: '3',
-    name: 'Emily Rodriguez',
-    position: 'HR Manager',
-    department: 'Human Resources',
-    bio: 'Emily has transformed our HR practices with innovative employee engagement programs and diversity initiatives. Her commitment to creating an inclusive workplace has made a significant impact on company culture.',
-    image: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=400&fit=crop&crop=faces',
-    skills: ['Employee Relations', 'Talent Acquisition', 'DEI', 'Policy Development'],
-    achievements: ['95% employee satisfaction', 'Reduced turnover by 40%', 'DEI Excellence Award']
-  },
-  {
-    id: '4',
-    name: 'David Okonkwo',
-    position: 'Sales Team Lead',
-    department: 'Sales',
-    bio: 'David is a top performer with exceptional relationship-building skills and a track record of exceeding sales targets. His leadership has helped grow our client base significantly over the past three years.',
-    image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=400&h=400&fit=crop&crop=faces',
-    skills: ['B2B Sales', 'Client Relations', 'Negotiation', 'Team Leadership'],
-    achievements: ['200% of sales quota', 'Closed 50+ major deals', 'Built enterprise client base']
-  },
-  {
-    id: '5',
-    name: 'Lisa Thompson',
-    position: 'Finance Controller',
-    department: 'Finance',
-    bio: 'Lisa ensures financial integrity and strategic planning with her keen analytical skills. She has streamlined our financial processes and provided insights that have improved our bottom line.',
-    image: 'https://images.unsplash.com/photo-1594744803329-e58b31de8bf5?w=400&h=400&fit=crop&crop=faces',
-    skills: ['Financial Analysis', 'Budgeting', 'Compliance', 'Strategic Planning'],
-    achievements: ['Cost savings of $500K', 'Clean audit record', 'Financial process optimization']
-  },
-  {
-    id: '6',
-    name: 'James Park',
-    position: 'Product Manager',
-    department: 'Product',
-    bio: 'James has a vision for product innovation and customer-centric design. His products have received excellent market reception and generated significant revenue for the company.',
-    image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=400&fit=crop&crop=faces',
-    skills: ['Product Strategy', 'UX Design', 'Market Research', 'Roadmap Planning'],
-    achievements: ['3 successful product launches', 'Net Promoter Score of 85', 'Revenue growth of 180%']
-  }
-];
-
 const CandidateVoting: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   
-  const [candidates] = useState<Candidate[]>(mockCandidates);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(true);
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   
   // AGM Timer enforcement
@@ -108,12 +44,13 @@ const CandidateVoting: React.FC = () => {
   const [startDateTime, setStartDateTime] = useState<Date | null>(null);
   const [endTime, setEndTime] = useState<string>('');
   
-  // Check if voting is allowed
+  // Check if voting is allowed — prefer server session status, fall back to localStorage timer
   const isVotingAllowed = () => {
+    // If we have a confirmed active session from the server, voting is allowed
+    if (activeSessionId) return true;
+    // Fall back to localStorage timer for backward compat
     const timerStart = localStorage.getItem('agmTimerStart');
     const timerEnd = localStorage.getItem('agmTimerEnd');
-    
-    // If timer hasn't started or has ended, voting is not allowed
     return !!(timerStart && !timerEnd);
   };
   
@@ -122,36 +59,23 @@ const CandidateVoting: React.FC = () => {
     const checkTimerStatus = () => {
       const savedStartDateTime = localStorage.getItem('agmStartDateTime');
       const savedEndTime = localStorage.getItem('agmTimerEndTime');
-      
-      if (savedStartDateTime) {
-        setStartDateTime(new Date(savedStartDateTime));
-      }
-      if (savedEndTime) {
-        setEndTime(savedEndTime);
-      }
-      
-      if (!isVotingAllowed()) {
-        setShowLockedModal(true);
-      }
+      if (savedStartDateTime) setStartDateTime(new Date(savedStartDateTime));
+      if (savedEndTime) setEndTime(savedEndTime);
+      if (!isVotingAllowed()) setShowLockedModal(true);
     };
-    
     checkTimerStatus();
-    
-    // Listen for timer updates
-    const handleTimerUpdate = () => {
-      checkTimerStatus();
-    };
-    
+    const handleTimerUpdate = () => checkTimerStatus();
     window.addEventListener('agmTimerUpdated', handleTimerUpdate);
     window.addEventListener('storage', handleTimerUpdate);
-    
     return () => {
       window.removeEventListener('agmTimerUpdated', handleTimerUpdate);
       window.removeEventListener('storage', handleTimerUpdate);
     };
   }, []);
+
   const [voteType, setVoteType] = useState<'regular' | 'proxy' | 'split' | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [voteError, setVoteError] = useState<string | null>(null);
   const [votedCandidates, setVotedCandidates] = useState<Set<string>>(new Set());
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [voteWeight, setVoteWeight] = useState({ ownVote: 1, proxyCount: 0, totalWeight: 1, proxyAssignees: [] as any[] });
@@ -162,33 +86,64 @@ const CandidateVoting: React.FC = () => {
   const [blockchainReceipt, setBlockchainReceipt] = useState<any>(null);
   const [showClosedModal, setShowClosedModal] = useState(false);
 
+  // Load candidates + session + vote weight from real API
   useEffect(() => {
-    // Calculate vote weight for current user
-    if (user) {
-      const userId = parseInt(user.id) || 1;
-      const weight = calculateVoteWeight(userId);
-      setVoteWeight(weight);
-      
-      // Check eligibility (using motion ID 1 as default for candidate voting)
-      const eligible = checkVoteEligibility(userId, 1);
-      setEligibility(eligible);
-      
-      // Check AGM status
-      checkAGMStatus();
-    }
-  }, [user]);
+    const loadData = async () => {
+      if (!user) return;
+      setCandidatesLoading(true);
+      try {
+        // 1. Get active session
+        const sessionRes = await api.getActiveSession();
+        const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+        const session = sessions[0];
+        const sessionId = session?.SessionID || session?.sessionId || null;
+        setActiveSessionId(sessionId);
 
-  const checkAGMStatus = async () => {
-    try {
-      const response = await api.get('/sessions?status=in_progress');
-      const sessions = (response.data as any)?.sessions || [];
-      if (sessions.length === 0 && user?.role !== 'auditor') {
-        setShowClosedModal(true);
+        if (!session && user?.role !== 'auditor') {
+          setShowClosedModal(true);
+        }
+
+        // 2. Load candidates
+        const candRes = await api.getCandidates();
+        if (candRes.success && candRes.data) {
+          const mapped: Candidate[] = (Array.isArray(candRes.data) ? candRes.data : []).map((c: any) => ({
+            id: (c.CandidateID || c.id)?.toString(),
+            name: c.FullName || c.name || `${c.FirstName || ''} ${c.LastName || ''}`.trim(),
+            position: c.Position || c.position || '',
+            department: c.Department || c.department || '',
+            bio: c.Bio || c.bio || '',
+            image: c.ProfilePictureURL || c.image || undefined,
+            skills: c.Skills ? (typeof c.Skills === 'string' ? c.Skills.split(',').map((s: string) => s.trim()) : c.Skills) : [],
+            achievements: c.Achievements ? (typeof c.Achievements === 'string' ? c.Achievements.split(',').map((s: string) => s.trim()) : c.Achievements) : [],
+          }));
+          setCandidates(mapped);
+        }
+
+        // 3. Load vote weight / proxy info
+        if (sessionId) {
+          try {
+            const userId = parseInt(user.id);
+            const weightRes = await api.getVoteWeightForUser(userId, sessionId);
+            if (weightRes.success && weightRes.data) {
+              const wd = weightRes.data as any;
+              setVoteWeight({
+                ownVote: wd.ownVotes ?? 1,
+                proxyCount: wd.proxyCount ?? 0,
+                totalWeight: wd.totalVotes ?? 1,
+                proxyAssignees: wd.proxies ?? [],
+              });
+              setEligibility({ canVote: wd.canVote !== false, reason: wd.reason || null });
+            }
+          } catch { /* non-critical */ }
+        }
+      } catch (err) {
+        console.error('Error loading candidate voting data:', err);
+      } finally {
+        setCandidatesLoading(false);
       }
-    } catch (error) {
-      console.error('Error checking AGM status:', error);
-    }
-  };
+    };
+    loadData();
+  }, [user]);
 
   const handleCandidateClick = (candidate: Candidate) => {
     // Check if voting is allowed (AGM timer check)
@@ -232,80 +187,71 @@ const CandidateVoting: React.FC = () => {
 
   const handleSubmitVote = async () => {
     if (!selectedCandidate || !voteType || !user) return;
-    
-    // Check if voting is allowed (AGM timer check)
-    if (!isVotingAllowed()) {
-      setShowLockedModal(true);
+    if (!isVotingAllowed()) { setShowLockedModal(true); return; }
+    if (!activeSessionId) {
+      setVoteError('No active AGM session found. Please contact the administrator.');
       return;
     }
-    
+
     setIsSubmitting(true);
-    
-    // Cast vote with split voting support
-    const userId = parseInt(user.id);
-    const candidateId = selectedCandidate.id;
-    const voteValue = 'Yes'; // For candidate voting, it's always 'Yes'
-    
-    if (voteType === 'split') {
-      // Cast split vote with selected proxies only
-      castVote(userId, 1, voteValue, candidateId, selectedProxyIds);
-    } else if (voteType === 'proxy') {
-      // Cast full proxy vote
-      castVote(userId, 1, voteValue, candidateId);
-    } else {
-      // Cast regular vote (own vote only)
-      castVote(userId, 1, voteValue, candidateId, []);
+    setVoteError(null);
+
+    try {
+      const candidateId = parseInt(selectedCandidate.id);
+      const finalWeight = voteType === 'split' ? splitVoteWeight
+        : voteType === 'proxy' ? voteWeight.totalWeight
+        : voteWeight.ownVote;
+
+      // Cast vote via real API
+      const voteRes = await api.castCandidateVote({
+        sessionId: activeSessionId,
+        candidateId,
+        votesToAllocate: finalWeight,
+        ...(voteType === 'split' && selectedProxyIds.length > 0 ? { proxyUserIds: selectedProxyIds } : {}),
+        ...(voteType === 'proxy' && voteWeight.proxyAssignees.length > 0 ? { proxyUserIds: voteWeight.proxyAssignees.map((a: any) => a.id || a.userId) } : {}),
+      });
+
+      if (!voteRes.success && voteRes.message) {
+        setVoteError(voteRes.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Record on real backend blockchain
+      try {
+        await api.recordBlockchainVote({
+          voteId: (voteRes.data as any)?.result?.VoteID?.toString() || `VOTE-${Date.now()}`,
+          userId: user.id,
+          sessionId: activeSessionId,
+          candidateId,
+          voteChoice: `Yes (Weight: ${finalWeight})`,
+          timestamp: new Date().toISOString(),
+        });
+        setBlockchainReceipt({ recorded: true });
+      } catch { /* non-critical */ }
+
+      setVotedCandidates(prev => new Set(prev).add(selectedCandidate.id));
+      setIsSubmitting(false);
+      setShowSuccessModal(true);
+
+      setTimeout(() => {
+        setShowSuccessModal(false);
+        setSelectedCandidate(null);
+        setVoteType(null);
+        setSelectedProxyIds([]);
+        setSplitVoteWeight(0);
+      }, 3000);
+    } catch (error: any) {
+      console.error('Vote submission error:', error);
+      setVoteError(error?.message || 'Failed to submit vote. Please try again.');
+      setIsSubmitting(false);
     }
-    
-    // 🔐 BLOCKCHAIN: Record vote on blockchain
-    const finalWeight = voteType === 'split' ? splitVoteWeight : 
-                       voteType === 'proxy' ? voteWeight.totalWeight : 
-                       voteWeight.ownVote;
-    
-    const voteData = {
-      voteId: `VOTE-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      userId: user.email,
-      userName: user.name,
-      candidateId: selectedCandidate.id,
-      candidateName: selectedCandidate.name,
-      voteChoice: `Yes (Weight: ${finalWeight})`,
-      timestamp: new Date().toISOString(),
-      sessionId: `session-${Date.now()}`
-    };
-    
-    const receipt = await blockchainService.recordVoteOnChain(voteData);
-    setBlockchainReceipt(receipt);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Add to voted candidates
-    setVotedCandidates(prev => new Set(prev).add(selectedCandidate.id));
-    
-    setIsSubmitting(false);
-    setShowSuccessModal(true);
-    
-    // Close modal after 3 seconds
-    setTimeout(() => {
-      setShowSuccessModal(false);
-      setSelectedCandidate(null);
-      setVoteType(null);
-      setSelectedProxyIds([]);
-      setSplitVoteWeight(0);
-    }, 3000);
   };
 
   const hasVotedFor = (candidateId: string) => votedCandidates.has(candidateId);
 
-  // Filter candidates based on proxy restrictions
+  // Filter candidates based on proxy restrictions (real proxies from API)
   const getFilteredCandidates = () => {
-    const mockUser = getMockUser(parseInt(user?.id || '1'));
-    
-    // If user is instructional proxy, only show allowed candidates
-    if (mockUser?.appointment_type === 'instructional' && mockUser.allowed_candidates) {
-      return candidates.filter(c => mockUser.allowed_candidates!.includes(c.id));
-    }
-    
     return candidates;
   };
 
@@ -447,6 +393,17 @@ const CandidateVoting: React.FC = () => {
         )}
 
         {/* Candidates Grid */}
+        {candidatesLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0072CE]"></div>
+            <span className="ml-4 text-[#464B4B]/70">Loading candidates...</span>
+          </div>
+        ) : candidates.length === 0 ? (
+          <div className="text-center py-20 text-[#464B4B]/60">
+            <Users className="h-16 w-16 mx-auto mb-4 opacity-40" />
+            <p className="text-xl">No candidates available for this session.</p>
+          </div>
+        ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredCandidates.map((candidate, index) => (
             <motion.div
@@ -505,6 +462,7 @@ const CandidateVoting: React.FC = () => {
             </motion.div>
           ))}
         </div>
+        )}{/* end candidatesLoading ternary */}
 
         {/* Candidate Detail Modal */}
         <AnimatePresence>
@@ -753,6 +711,12 @@ const CandidateVoting: React.FC = () => {
                         </div>
                       </div>
                       
+                      {voteError && (
+                        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-center space-x-2">
+                          <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                          <span>{voteError}</span>
+                        </div>
+                      )}
                       <div className="flex space-x-4">
                         <button
                           onClick={() => setVoteType(null)}

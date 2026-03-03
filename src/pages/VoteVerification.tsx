@@ -2,8 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search, CheckCircle, XCircle, AlertTriangle, Download, ExternalLink, Shield, Clock, Hash, FileText, Copy, Check } from 'lucide-react';
 import Header from '../components/Header';
-import { blockchainService, type VerificationCertificate } from '../services/blockchain';
+import api from '../services/api';
 import { pdfService } from '../services/pdfExport';
+
+interface VerificationCertificate {
+  certificateId: string;
+  verificationStatus: 'verified' | 'tampered' | 'not_found';
+  voteHash: {
+    voteId: string;
+    hash: string;
+    timestamp: string;
+    blockchainReceipt?: {
+      transactionId?: string;
+      blockNumber?: number;
+      confirmations?: number;
+      networkName?: string;
+      gasUsed?: string | number;
+    };
+  };
+  voteData?: {
+    userName?: string;
+    candidateName?: string;
+    resolutionTitle?: string;
+    voteChoice?: string;
+  };
+  issuerSignature?: string;
+}
 
 const VoteVerification: React.FC = () => {
   const [searchType, setSearchType] = useState<'hash' | 'voteId'>('voteId');
@@ -43,20 +67,49 @@ const VoteVerification: React.FC = () => {
     setCertificate(null);
 
     try {
-      let hash = searchVal;
+      let resolvedHash = searchVal;
 
       if (searchTp === 'voteId') {
-        const record = await blockchainService.findVoteById(searchVal);
-        if (!record) {
-          setError('Vote ID not found in blockchain');
+        // Look up by vote ID from real backend
+        const voteRes = await api.getBlockchainVote(searchVal);
+        if (!voteRes.success || !voteRes.data) {
+          setError('Vote ID not found in the blockchain database');
           setIsSearching(false);
           return;
         }
-        hash = record.voteHash.hash;
+        const voteData = voteRes.data as any;
+        resolvedHash = voteData.VoteHash || voteData.hash || voteData.voteHash || searchVal;
       }
 
-      // Verify the vote
-      const cert = await blockchainService.verifyVote(hash);
+      // Verify the vote hash against the real backend
+      const verifyRes = await api.verifyBlockchainVote(resolvedHash);
+      const d = verifyRes.data as any;
+
+      if (!verifyRes.success || !d) {
+        // Not found
+        const cert: VerificationCertificate = {
+          certificateId: `CERT-NOTFOUND-${Date.now()}`,
+          verificationStatus: 'not_found',
+          voteHash: { voteId: searchVal, hash: resolvedHash, timestamp: new Date().toISOString() },
+        };
+        setCertificate(cert);
+        return;
+      }
+
+      const cert: VerificationCertificate = {
+        certificateId: d.certificateId || `CERT-${Date.now()}`,
+        verificationStatus: d.isValid === true ? 'verified' : d.isValid === false ? 'tampered' : 'not_found',
+        voteHash: {
+          voteId: d.voteId || d.VoteID?.toString() || searchVal,
+          hash: d.hash || d.VoteHash || resolvedHash,
+          timestamp: d.timestamp || d.CreatedAt || new Date().toISOString(),
+          blockchainReceipt: {
+            transactionId: d.transactionId || d.TransactionID,
+            blockNumber: d.blockNumber || d.BlockNumber,
+            confirmations: d.confirmations || 1,
+          },
+        },
+      };
       setCertificate(cert);
     } catch (err) {
       setError('Verification failed. Please try again.');
@@ -260,23 +313,23 @@ const VoteVerification: React.FC = () => {
                       </div>
                       <div>
                         <p className="text-sm text-[#464B4B]/70">Voter</p>
-                        <p className="font-semibold text-[#464B4B]">{certificate.voteData.userName}</p>
+                        <p className="font-semibold text-[#464B4B]">{certificate.voteData?.userName}</p>
                       </div>
-                      {certificate.voteData.candidateName && (
+                      {certificate.voteData?.candidateName && (
                         <div>
                           <p className="text-sm text-[#464B4B]/70">Candidate</p>
-                          <p className="font-semibold text-[#464B4B]">{certificate.voteData.candidateName}</p>
+                          <p className="font-semibold text-[#464B4B]">{certificate.voteData?.candidateName}</p>
                         </div>
                       )}
-                      {certificate.voteData.resolutionTitle && (
+                      {certificate.voteData?.resolutionTitle && (
                         <div>
                           <p className="text-sm text-[#464B4B]/70">Resolution</p>
-                          <p className="font-semibold text-[#464B4B]">{certificate.voteData.resolutionTitle}</p>
+                          <p className="font-semibold text-[#464B4B]">{certificate.voteData?.resolutionTitle}</p>
                         </div>
                       )}
                       <div>
                         <p className="text-sm text-[#464B4B]/70">Vote Choice</p>
-                        <p className="font-semibold text-[#464B4B]">{certificate.voteData.voteChoice}</p>
+                        <p className="font-semibold text-[#464B4B]">{certificate.voteData?.voteChoice}</p>
                       </div>
                     </div>
                   </div>

@@ -117,8 +117,9 @@ const AdminDashboard: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [users, setUsers] = useState<User[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
-  const [departments, setDepartments] = useState<any[]>([]);
+  const [_departments, setDepartments] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [proxyGroups, setProxyGroups] = useState<ProxyGroup[]>([]);
@@ -203,72 +204,104 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const loadTimerStatus = () => {
-    const timerStart = localStorage.getItem('agmTimerStart');
-    const timerEnd = localStorage.getItem('agmTimerEnd');
-    const savedStartDateTime = localStorage.getItem('agmStartDateTime');
-    const savedEndTime = localStorage.getItem('agmTimerEndTime');
+  const loadTimerStatus = async () => {
+    try {
+      // Check for in-progress session first
+      const activeRes = await api.getActiveSession();
+      const activeSession = activeRes.success && activeRes.data
+        ? (Array.isArray(activeRes.data) ? activeRes.data[0] : activeRes.data)
+        : null;
 
-    if (timerEnd) {
-      setTimerStatus('ended');
-    } else if (timerStart) {
-      setTimerStatus('running');
-    } else {
+      if (activeSession) {
+        setTimerStatus('running');
+        setActiveSessionId(activeSession.SessionID);
+        if (activeSession.ScheduledStartTime) setStartDateTime(new Date(activeSession.ScheduledStartTime));
+        if (activeSession.ScheduledEndTime) {
+          const endDate = new Date(activeSession.ScheduledEndTime);
+          setEndTime(`${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`);
+        }
+        return;
+      }
+
+      // No active session — look at all sessions to find the latest
+      const allRes = await api.getSessions();
+      if (allRes.success && allRes.data && Array.isArray(allRes.data) && allRes.data.length > 0) {
+        const sorted = [...allRes.data].sort((a: any, b: any) =>
+          new Date(b.ScheduledStartTime || b.CreatedAt).getTime() - new Date(a.ScheduledStartTime || a.CreatedAt).getTime()
+        );
+        const latest = sorted[0] as any;
+        setActiveSessionId(latest.SessionID);
+        setTimerStatus(latest.Status === 'completed' ? 'ended' : 'idle');
+        if (latest.ScheduledStartTime) setStartDateTime(new Date(latest.ScheduledStartTime));
+        if (latest.ScheduledEndTime) {
+          const endDate = new Date(latest.ScheduledEndTime);
+          setEndTime(`${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`);
+        }
+      } else {
+        setTimerStatus('idle');
+      }
+    } catch (error) {
+      console.error('Error loading timer status:', error);
       setTimerStatus('idle');
     }
-
-    if (savedStartDateTime) {
-      setStartDateTime(new Date(savedStartDateTime));
-    }
-    if (savedEndTime) {
-      setEndTime(savedEndTime);
-    }
-
-    // Listen for timer updates
-    const handleTimerUpdate = () => {
-      loadTimerStatus();
-    };
-
-    window.addEventListener('agmTimerUpdated', handleTimerUpdate);
-    return () => window.removeEventListener('agmTimerUpdated', handleTimerUpdate);
   };
 
-  const handleStartTimer = () => {
-    const savedStartDateTime = localStorage.getItem('agmStartDateTime');
-    const savedEndTime = localStorage.getItem('agmTimerEndTime');
-
-    if (!savedStartDateTime || !savedEndTime) {
-      alert('Please set the timer configuration first using the "Set Timer" button.');
+  const handleStartTimer = async () => {
+    if (!activeSessionId) {
+      alert('No session found. Please configure a session first using the "Set Timer" button.');
       return;
     }
-
-    localStorage.setItem('agmTimerStart', new Date().toISOString());
-    localStorage.removeItem('agmTimerEnd');
-    setTimerStatus('running');
-    window.dispatchEvent(new CustomEvent('agmTimerUpdated'));
+    try {
+      const response = await api.startSession(activeSessionId);
+      if (response.success) {
+        setTimerStatus('running');
+      } else {
+        alert(response.message || 'Failed to start session');
+      }
+    } catch (error) {
+      console.error('Error starting session:', error);
+      alert('Failed to start session. Please try again.');
+    }
   };
 
-  const handleEndTimer = () => {
-    if (timerStatus !== 'running') {
+  const handleEndTimer = async () => {
+    if (timerStatus !== 'running' || !activeSessionId) {
       alert('Timer is not currently running.');
       return;
     }
-
-    localStorage.setItem('agmTimerEnd', new Date().toISOString());
-    setTimerStatus('ended');
-    window.dispatchEvent(new CustomEvent('agmTimerUpdated'));
+    try {
+      const response = await api.endSession(activeSessionId);
+      if (response.success) {
+        setTimerStatus('ended');
+      } else {
+        alert(response.message || 'Failed to end session');
+      }
+    } catch (error) {
+      console.error('Error ending session:', error);
+      alert('Failed to end session. Please try again.');
+    }
   };
 
-  const handleResetTimer = () => {
-    if (confirm('Are you sure you want to reset the AGM timer? This will clear all timer data.')) {
-      localStorage.removeItem('agmTimerStart');
-      localStorage.removeItem('agmTimerEnd');
-      localStorage.removeItem('agmStartDateTime');
-      localStorage.removeItem('agmTimerEndTime');
+  const handleResetTimer = async () => {
+    if (!confirm('Are you sure you want to reset the AGM timer? This will clear all timer data.')) return;
+    if (!activeSessionId) {
       setTimerStatus('idle');
       setStartDateTime(null);
       setEndTime('');
-      window.dispatchEvent(new CustomEvent('agmTimerUpdated'));
+      return;
+    }
+    try {
+      const response = await api.resetSession(activeSessionId);
+      if (response.success) {
+        setTimerStatus('idle');
+        setStartDateTime(null);
+        setEndTime('');
+      } else {
+        alert(response.message || 'Failed to reset session');
+      }
+    } catch (error) {
+      console.error('Error resetting session:', error);
+      alert('Failed to reset session. Please try again.');
     }
   };
 
@@ -290,15 +323,25 @@ const AdminDashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-      // Load vote limits from localStorage (set by super admin)
-      const savedLimits = localStorage.getItem('voteLimits');
-      if (savedLimits) {
-        const limits = JSON.parse(savedLimits);
-        setVoteLimits({
-          min: limits.min_votes_per_user,
-          max: limits.max_votes_per_user,
-          default: limits.default_votes_per_user
-        });
+      // Load vote limits from active session's allocation statistics
+      try {
+        const activeRes = await api.getActiveSession();
+        const activeSession = activeRes.success && activeRes.data
+          ? (Array.isArray(activeRes.data) ? activeRes.data[0] : activeRes.data)
+          : null;
+        if (activeSession?.SessionID) {
+          const statsRes = await api.getAllocationStatistics(activeSession.SessionID);
+          if (statsRes.success && (statsRes.data as any)?.statistics) {
+            const stats = (statsRes.data as any).statistics;
+            setVoteLimits({
+              min: stats.minAllocated ?? 1,
+              max: stats.maxAllocated ?? 10,
+              default: stats.avgAllocated ? Math.round(stats.avgAllocated) : 3
+            });
+          }
+        }
+      } catch {
+        // Fall back to defaults if statistics unavailable
       }
 
       // Load data from API based on active tab
@@ -1017,11 +1060,6 @@ const AdminDashboard: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [totalEligible, quorumThreshold]);
-
-  const handleTabChange = (tabId: string) => {
-    setActiveTab(tabId as any);
-    setSearchTerm('');
-  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#F4F4F4] via-white to-[#F4F4F4]">
@@ -2936,7 +2974,8 @@ const AdminDashboard: React.FC = () => {
         {/* Set Timer Modal */}
         <SetTimerModal
           isOpen={showSetTimerModal}
-          onClose={() => setShowSetTimerModal(false)}
+          onClose={() => { setShowSetTimerModal(false); loadTimerStatus(); }}
+          sessionId={activeSessionId ?? undefined}
         />
 
         {/* Proxy Instructions Modal */}

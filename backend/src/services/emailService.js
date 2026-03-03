@@ -314,9 +314,76 @@ const verifyEmailConfig = async () => {
   }
 };
 
+/**
+ * Send password reset email with temporary password
+ */
+const sendPasswordResetEmail = async ({ email, firstName, tempPassword }) => {
+  try {
+    const loginUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    const mailOptions = {
+      from: `"WeVote Platform" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: 'WeVote - Password Reset',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #0072CE 0%, #171C8F 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .password-box { background: white; padding: 20px; border-left: 4px solid #0072CE; margin: 20px 0; border-radius: 5px; text-align: center; }
+            .temp-password { font-size: 24px; font-weight: bold; font-family: monospace; background: #f4f4f4; padding: 12px 24px; border-radius: 8px; display: inline-block; letter-spacing: 2px; color: #171C8F; }
+            .button { display: inline-block; background: linear-gradient(135deg, #0072CE 0%, #171C8F 100%); color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 20px 0; font-weight: bold; }
+            .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px; }
+            .footer { text-align: center; color: #666; font-size: 12px; margin-top: 30px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔐 Password Reset</h1>
+              <p>Your temporary password</p>
+            </div>
+            <div class="content">
+              <p>Hello ${firstName},</p>
+              <p>You requested a password reset for your WeVote account. Use the temporary password below to log in:</p>
+              <div class="password-box">
+                <p style="margin:0 0 10px;">Your temporary password:</p>
+                <span class="temp-password">${tempPassword}</span>
+              </div>
+              <div class="warning">
+                ⚠️ <strong>Important:</strong> You will be required to set a new password immediately after logging in. This temporary password expires after first use.
+              </div>
+              <div style="text-align: center;">
+                <a href="${loginUrl}/login" class="button">Login to WeVote</a>
+              </div>
+              <p>If you did not request a password reset, please contact your administrator immediately.</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated message from WeVote. Please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    logger.info(`Password reset email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    logger.error('Failed to send password reset email:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendAdminCredentialsEmail,
   sendUserApprovalEmail,
   sendSessionAssignmentEmail,
+  sendPasswordResetEmail,
   verifyEmailConfig
 };

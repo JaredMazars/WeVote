@@ -19,7 +19,6 @@ import Header from '../components/Header';
 import VotingStatusBar from '../components/VotingStatusBar';
 import VotingLockedModal from '../components/VotingLockedModal';
 import AGMClosedModal from '../components/AGMClosedModal';
-import { blockchainService } from '../services/blockchain';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 
@@ -68,7 +67,7 @@ type VoteChoice = 'for' | 'against' | 'abstain' | null;
 const ResolutionVoting: React.FC = () => {
   const { user } = useAuth();
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
-  const [voteStats, setVoteStats] = useState<Record<string, VoteStats>>({});
+  const [voteStats, _setVoteStats] = useState<Record<string, VoteStats>>({});
   const [userVotes, setUserVotes] = useState<Record<string, VoteChoice>>({});
   const [proxyGroups, setProxyGroups] = useState<ProxyGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,6 +79,8 @@ const ResolutionVoting: React.FC = () => {
   const [blockchainReceipt, setBlockchainReceipt] = useState<any>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastVotedChoice, setLastVotedChoice] = useState<VoteChoice | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const [voteError, setVoteError] = useState<string | null>(null);
   
   // AGM Timer enforcement
   const [showLockedModal, setShowLockedModal] = useState(false);
@@ -87,12 +88,11 @@ const ResolutionVoting: React.FC = () => {
   const [endTime, setEndTime] = useState<string>('');
   const [showClosedModal, setShowClosedModal] = useState(false);
   
-  // Check if voting is allowed
+  // Check if voting is allowed — prefer server session status, fall back to localStorage timer
   const isVotingAllowed = () => {
+    if (activeSessionId) return true;
     const timerStart = localStorage.getItem('agmTimerStart');
     const timerEnd = localStorage.getItem('agmTimerEnd');
-    
-    // If timer hasn't started or has ended, voting is not allowed
     return !!(timerStart && !timerEnd);
   };
 
@@ -167,22 +167,26 @@ const ResolutionVoting: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      // 1. Get active session
+      const sessionRes = await api.getActiveSession();
+      const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+      const session = sessions[0];
+      const sessionId = session?.SessionID || session?.sessionId || null;
+      setActiveSessionId(sessionId);
+
       // Load resolutions from API
       try {
         const resResponse = await api.getResolutions();
-        console.log('Resolutions API response:', resResponse);
-        
         if (resResponse.success && resResponse.data) {
-          // Map backend data to frontend format
-          const mappedResolutions = resResponse.data.map((res: any) => ({
+          const mappedResolutions = (Array.isArray(resResponse.data) ? resResponse.data : []).map((res: any) => ({
             id: res.ResolutionID?.toString() || res.id,
             resolution_number: res.ResolutionNumber || `2025/${res.ResolutionID}`,
             title: res.ResolutionTitle || res.Title,
             description: res.Description || '',
             proposed_by: res.ProposedByName || res.proposed_by || 'Board of Directors',
-            voting_requirement: res.RequiredMajority >= 66 ? 'special' : 'ordinary',
+            voting_requirement: (res.RequiredMajority >= 66 ? 'special' : 'ordinary') as 'ordinary' | 'special',
             category: res.Category || 'General',
-            status: res.Status === 'active' ? 'active' : res.Status === 'closed' ? 'closed' : 'upcoming',
+            status: (res.Status === 'active' ? 'active' : res.Status === 'closed' ? 'closed' : 'upcoming') as 'active' | 'closed' | 'upcoming',
             vote_start_date: res.CreatedAt || res.created_at || new Date().toISOString(),
             vote_end_date: res.UpdatedAt || res.updated_at || new Date().toISOString(),
             created_at: res.CreatedAt || res.created_at || new Date().toISOString(),
@@ -190,11 +194,8 @@ const ResolutionVoting: React.FC = () => {
             financial_impact: '',
             effective_date: ''
           }));
-          
           setResolutions(mappedResolutions);
-          console.log('Loaded resolutions:', mappedResolutions);
         } else {
-          console.error('Failed to load resolutions:', resResponse.message);
           setResolutions([]);
         }
       } catch (error) {
@@ -202,7 +203,6 @@ const ResolutionVoting: React.FC = () => {
         setResolutions([]);
       }
 
-      // Load proxy groups (if applicable)
       setProxyGroups([]);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -212,43 +212,52 @@ const ResolutionVoting: React.FC = () => {
   };
 
   const handleVote = async (resolutionId: string, choice: VoteChoice) => {
-    // Check if voting is allowed (AGM timer check)
-    if (!isVotingAllowed()) {
-      setShowLockedModal(true);
+    if (!isVotingAllowed()) { setShowLockedModal(true); return; }
+    if (!user) return;
+    if (!activeSessionId) {
+      setVoteError('No active AGM session. Please contact the administrator.');
       return;
     }
-    
-    if (!user) return;
-    
+
+    setVoteError(null);
+
     try {
-      // Record vote
+      const voteChoiceMap: Record<string, 'yes' | 'no' | 'abstain'> = { for: 'yes', against: 'no', abstain: 'abstain' };
+      const voteChoice = voteChoiceMap[choice as string] ?? 'abstain';
+
+      // Cast vote via real API
+      const voteRes = await api.castResolutionVote({
+        sessionId: activeSessionId,
+        resolutionId: parseInt(resolutionId),
+        voteChoice,
+      });
+
+      if (!voteRes.success && voteRes.message) {
+        setVoteError(voteRes.message);
+        return;
+      }
+
       setUserVotes(prev => ({ ...prev, [resolutionId]: choice }));
       setLastVotedChoice(choice);
-      
-      // Find the resolution being voted on
-      const resolution = resolutions.find(r => r.id === resolutionId);
-      
-      // 🔐 BLOCKCHAIN: Record vote on blockchain
-      const voteData = {
-        voteId: `VOTE-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        userId: user.email,
-        userName: user.name,
-        resolutionId: resolutionId,
-        resolutionTitle: resolution?.title || 'Unknown Resolution',
-        voteChoice: choice || 'abstain',
-        timestamp: new Date().toISOString(),
-        sessionId: `session-${Date.now()}`
-      };
-      
-      const receipt = await blockchainService.recordVoteOnChain(voteData);
-      setBlockchainReceipt(receipt);
-      
-      // Show success modal
+
+      // Record on real backend blockchain
+      try {
+        await api.recordBlockchainVote({
+          voteId: (voteRes.data as any)?.result?.VoteID?.toString() || `VOTE-${Date.now()}`,
+          userId: user.id,
+          sessionId: activeSessionId,
+          resolutionId: parseInt(resolutionId),
+          voteChoice,
+          timestamp: new Date().toISOString(),
+        });
+        setBlockchainReceipt({ recorded: true });
+      } catch { /* non-critical */ }
+
       setShowSuccessModal(true);
-      setTimeout(() => setShowSuccessModal(false), 5000);
-    } catch (error) {
+      setTimeout(() => setShowSuccessModal(false), 4000);
+    } catch (error: any) {
       console.error('Error voting:', error);
-      alert('Failed to record vote');
+      setVoteError(error?.message || 'Failed to record vote. Please try again.');
     }
   };
 
@@ -390,6 +399,15 @@ const ResolutionVoting: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {/* Vote error notification */}
+          {voteError && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 flex-shrink-0" />
+              <span>{voteError}</span>
+              <button onClick={() => setVoteError(null)} className="ml-auto text-red-500 hover:text-red-700">✕</button>
+            </div>
+          )}
 
           {/* Resolutions List */}
           {loading ? (

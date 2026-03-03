@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Mail, ArrowLeft, AlertCircle, CheckCircle, Vote } from 'lucide-react';
+import apiService from '../services/api';
 
 const ForgotPassword: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -33,83 +34,39 @@ const ForgotPassword: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // ==========================================
-      // TESTING MODE - NO BACKEND REQUIRED
-      // ==========================================
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const result = await apiService.forgotPassword(email);
 
-      // Check if user exists in localStorage (from registration)
-      const testUser = localStorage.getItem('testUser');
-      let userFound = false;
+      if (result.success || result.message) {
+        // Backend always returns the same message for security (whether email exists or not)
+        const tempPassword = (result as any).tempPassword || (result.data as any)?.tempPassword;
 
-      if (testUser) {
-        const userData = JSON.parse(testUser);
-        if (userData.email === email) {
-          userFound = true;
+        let successMsg =
+          'If an account exists with this email, a temporary password has been sent. Please check your inbox.';
+
+        if (tempPassword) {
+          // Dev mode: backend exposes the temp password in the response
+          successMsg =
+            `A temporary password has been generated.\n\n` +
+            `🔐 Temporary Password: ${tempPassword}\n\n` +
+            `Use this to log in, then you will be prompted to set a new password.`;
+          console.log('🔐 Temporary password (dev mode):', tempPassword);
         }
-      }
 
-      // Generate random temporary password (10 characters: letters, numbers, special chars)
-      const generateTempPassword = () => {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
-        return Array.from({ length: 10 }, () => 
-          chars.charAt(Math.floor(Math.random() * chars.length))
-        ).join('');
-      };
+        setSuccess(successMsg);
+        setEmail('');
 
-      const tempPassword = generateTempPassword();
-
-      if (userFound) {
-        // Store temp password in localStorage
-        localStorage.setItem(`tempPassword_${email}`, tempPassword);
-        localStorage.setItem(`passwordResetRequired_${email}`, 'true');
-        
-        console.log('📧 TEST MODE - Password Reset Email:');
-        console.log('==================================');
-        console.log(`To: ${email}`);
-        console.log(`Subject: WeVote - Password Reset`);
-        console.log('');
-        console.log(`Hi there,`);
-        console.log('');
-        console.log(`You requested to reset your password. Here is your temporary password:`);
-        console.log('');
-        console.log(`Temporary Password: ${tempPassword}`);
-        console.log('');
-        console.log(`Please login with this temporary password at: http://localhost:5173/login`);
-        console.log(`You will be required to create a new password upon first login.`);
-        console.log('');
-        console.log(`If you did not request this, please contact support immediately.`);
-        console.log('');
-        console.log(`Best regards,`);
-        console.log(`WeVote Team`);
-        console.log('==================================');
-
-        setSuccess(
-          `✅ A temporary password has been sent to your email address: ${email}\n\n` +
-          `🔐 TEST MODE - Your temporary password is: ${tempPassword}\n\n` +
-          `Please check the console for the full email details.`
-        );
+        // Redirect to login after 6 seconds
+        setTimeout(() => {
+          navigate('/login', {
+            state: {
+              message: 'Please log in with your temporary password.',
+              email: email,
+            },
+          });
+        }, 6000);
       } else {
-        // For security, don't reveal if user exists or not
-        console.log(`⚠️ Password reset attempt for non-existent email: ${email}`);
-        setSuccess(
-          'If an account exists with this email, a password reset link will be sent. Please check your inbox.'
-        );
+        setError(result.message || 'Something went wrong. Please try again.');
       }
-
-      setEmail('');
-      
-      // Redirect to login after 5 seconds
-      setTimeout(() => {
-        navigate('/login', { 
-          state: { 
-            message: 'Please check your email for your temporary password.',
-            email: email 
-          } 
-        });
-      }, 5000);
-
     } catch (error: any) {
       console.error('❌ Forgot password error:', error);
       setError('Network error. Please check your connection and try again.');

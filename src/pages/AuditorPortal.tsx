@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Header from '../components/Header';
+import api from '../services/api';
 import * as XLSX from 'xlsx';
 
 interface AuditLog {
@@ -32,121 +33,115 @@ export default function AuditorPortal() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'success' | 'failed' | 'warning'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [dateRange] = useState({ start: '', end: '' });
+  const [_isLoading, setIsLoading] = useState(true);
+  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
 
   // Quorum tracking
-  const [quorumThreshold] = useState(50);
-  const [totalEligible] = useState(100);
+  const [quorumThreshold, setQuorumThreshold] = useState(50);
+  const [totalEligible, setTotalEligible] = useState(0);
   const [liveAttendanceCount, setLiveAttendanceCount] = useState(0);
   const [quorumMet, setQuorumMet] = useState(false);
 
   useEffect(() => {
-    loadAuditLogs();
-    loadAttendance();
-    startLiveAttendanceTracking();
+    loadData();
   }, []);
 
   useEffect(() => {
-    // Calculate quorum
-    const attendancePercentage = (liveAttendanceCount / totalEligible) * 100;
+    const attendancePercentage = totalEligible > 0 ? (liveAttendanceCount / totalEligible) * 100 : 0;
     setQuorumMet(attendancePercentage >= quorumThreshold);
   }, [liveAttendanceCount, totalEligible, quorumThreshold]);
 
-  const loadAuditLogs = () => {
-    // Load from localStorage with tamper-evident hashing
-    const stored = localStorage.getItem('tamperEvidentLogs');
-    if (stored) {
-      const logs = JSON.parse(stored);
-      setAuditLogs(logs);
-    } else {
-      // Generate sample tamper-evident logs
-      const sampleLogs: AuditLog[] = [
-        {
-          id: '1',
-          timestamp: new Date().toISOString(),
-          userId: 'user-001',
-          userName: 'Demo User',
-          action: 'VOTE_CAST',
-          description: 'Cast vote for candidate Alice Johnson',
-          ipAddress: '192.168.1.100',
-          userAgent: 'Mozilla/5.0',
-          status: 'success',
-          dataHash: generateHash('vote-data-1'),
-          previousHash: '0000000000000000'
-        },
-        {
-          id: '2',
-          timestamp: new Date(Date.now() - 3600000).toISOString(),
-          userId: 'user-002',
-          userName: 'Jane Smith',
-          action: 'LOGIN',
-          description: 'User logged in successfully',
-          ipAddress: '192.168.1.101',
-          userAgent: 'Mozilla/5.0',
-          status: 'success',
-          dataHash: generateHash('login-data-2'),
-          previousHash: generateHash('vote-data-1')
-        },
-        {
-          id: '3',
-          timestamp: new Date(Date.now() - 7200000).toISOString(),
-          userId: 'unknown',
-          userName: 'Unknown',
-          action: 'LOGIN_FAILED',
-          description: 'Failed login attempt - invalid password',
-          ipAddress: '192.168.1.200',
-          userAgent: 'Mozilla/5.0',
-          status: 'failed',
-          dataHash: generateHash('failed-login-3'),
-          previousHash: generateHash('login-data-2')
-        }
-      ];
-      setAuditLogs(sampleLogs);
-      localStorage.setItem('tamperEvidentLogs', JSON.stringify(sampleLogs));
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      // Get active session first
+      const sessionRes = await api.getActiveSession();
+      const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+      const session = sessions[0];
+      const sessionId = session?.SessionID || session?.sessionId || null;
+      setActiveSessionId(sessionId);
+
+      await Promise.all([
+        loadAuditLogs(),
+        loadAttendance(sessionId),
+        sessionId ? loadQuorum(sessionId) : Promise.resolve(),
+      ]);
+    } catch (err) {
+      console.error('Error loading auditor data:', err);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const loadAttendance = () => {
-    const stored = localStorage.getItem('liveAttendance');
-    if (stored) {
-      const records = JSON.parse(stored);
-      setAttendance(records);
-      setLiveAttendanceCount(records.filter((r: AttendanceRecord) => r.status === 'present' || r.status === 'proxy').length);
-    } else {
-      // Sample attendance data
-      const sampleAttendance: AttendanceRecord[] = [
-        { userId: '1', userName: 'Demo User', checkedInAt: new Date().toISOString(), ipAddress: '192.168.1.100', status: 'present' },
-        { userId: '2', userName: 'Jane Smith', checkedInAt: new Date().toISOString(), ipAddress: '192.168.1.101', status: 'present' },
-        { userId: '3', userName: 'Bob Williams', checkedInAt: new Date().toISOString(), ipAddress: '192.168.1.102', status: 'proxy' }
-      ];
-      setAttendance(sampleAttendance);
-      setLiveAttendanceCount(3);
-      localStorage.setItem('liveAttendance', JSON.stringify(sampleAttendance));
-    }
-  };
-
-  const startLiveAttendanceTracking = () => {
-    // Simulate live updates every 5 seconds
-    const interval = setInterval(() => {
-      const stored = localStorage.getItem('liveAttendance');
-      if (stored) {
-        const records = JSON.parse(stored);
-        setLiveAttendanceCount(records.filter((r: AttendanceRecord) => r.status === 'present' || r.status === 'proxy').length);
+  const loadAuditLogs = async () => {
+    try {
+      const res = await api.getAuditLogs({ limit: 200 });
+      if (res.success && res.data) {
+        const raw = Array.isArray(res.data) ? res.data : (res.data as any).logs || [];
+        const mapped: AuditLog[] = raw.map((log: any) => ({
+          id: (log.LogID || log.id)?.toString(),
+          timestamp: log.CreatedAt || log.timestamp,
+          userId: (log.UserID || log.userId)?.toString(),
+          userName: log.UserName || log.userName || `User ${log.UserID}`,
+          action: log.Action || log.action,
+          description: log.Details || log.description || '',
+          ipAddress: log.IPAddress || log.ipAddress || '',
+          userAgent: log.UserAgent || log.userAgent || '',
+          status: (log.Status || 'success') as AuditLog['status'],
+          dataHash: log.DataHash || '',
+          previousHash: log.PreviousHash || '',
+        }));
+        setAuditLogs(mapped);
       }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  };
-
-  const generateHash = (data: string): string => {
-    // Simple hash function for demonstration
-    let hash = 0;
-    for (let i = 0; i < data.length; i++) {
-      const char = data.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+    } catch (err) {
+      console.error('Failed to load audit logs:', err);
     }
-    return Math.abs(hash).toString(16).padStart(16, '0');
   };
+
+  const loadAttendance = async (sessionId: number | null) => {
+    if (!sessionId) return;
+    try {
+      const res = await api.getAttendance(sessionId);
+      if (res.success && res.data) {
+        const raw = Array.isArray(res.data) ? res.data : (res.data as any).records || [];
+        const mapped: AttendanceRecord[] = raw.map((r: any) => ({
+          userId: (r.UserID || r.userId)?.toString(),
+          userName: r.UserName || r.userName || `User ${r.UserID}`,
+          checkedInAt: r.CheckedInAt || r.checkedInAt || new Date().toISOString(),
+          ipAddress: r.IPAddress || r.ipAddress || '',
+          status: (r.Status || 'present') as AttendanceRecord['status'],
+        }));
+        setAttendance(mapped);
+        setLiveAttendanceCount(mapped.filter(r => r.status === 'present' || r.status === 'proxy').length);
+      }
+    } catch (err) {
+      console.error('Failed to load attendance:', err);
+    }
+  };
+
+  const loadQuorum = async (sessionId: number) => {
+    try {
+      const res = await api.getQuorum(sessionId);
+      if (res.success && res.data) {
+        const d = res.data as any;
+        setTotalEligible(d.totalEligible ?? d.total_eligible ?? 0);
+        setQuorumThreshold(d.quorumThreshold ?? d.quorum_threshold ?? 50);
+        setLiveAttendanceCount(d.presentCount ?? d.present_count ?? 0);
+      }
+    } catch (err) {
+      console.error('Failed to load quorum:', err);
+    }
+  };
+
+  // Refresh attendance every 30 seconds
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const interval = setInterval(() => {
+      loadAttendance(activeSessionId);
+      loadQuorum(activeSessionId);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [activeSessionId]);
 
   const verifyLogIntegrity = (): boolean => {
     // Verify tamper-evident chain

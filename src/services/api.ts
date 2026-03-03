@@ -8,9 +8,32 @@ interface ApiResponse<T = any> {
 }
 
 class ApiService {
+  private async refreshAccessToken(): Promise<string | null> {
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (!refreshToken) return null;
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/refresh-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('refreshToken');
+        return null;
+      }
+      const data = await res.json();
+      localStorage.setItem('token', data.token);
+      if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+      return data.token;
+    } catch {
+      return null;
+    }
+  }
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    isRetry = false
   ): Promise<ApiResponse<T>> {
     try {
       // Get token from localStorage
@@ -25,15 +48,16 @@ class ApiService {
         },
       });
 
+      // Auto-refresh on 401 (expired token)
+      if (response.status === 401 && !isRetry) {
+        const newToken = await this.refreshAccessToken();
+        if (newToken) {
+          return this.request<T>(endpoint, options, true);
+        }
+        return { success: false, message: 'Session expired. Please log in again.' };
+      }
+
       const data = await response.json();
-      
-      // Debug logging
-      // console.log(`API Response from ${endpoint}:`, { 
-      //   status: response.status, 
-      //   ok: response.ok,
-      //   dataKeys: Object.keys(data),
-      //   data 
-      // });
       
       // Transform backend response format to frontend format
       // Backend may return: {count, users} or {candidates} or {data} etc.
@@ -93,10 +117,11 @@ class ApiService {
 
       const data = await response.json();
 
-      // Backend returns: { message, token, user }
+      // Backend returns: { message, token, refreshToken, user }
       if (response.ok && data.token && data.user) {
-        // Store the token
+        // Store the token and refresh token
         localStorage.setItem('token', data.token);
+        if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
         
         // Transform backend user format to frontend format
         return {
@@ -140,6 +165,13 @@ class ApiService {
   async loginWithMicrosoft() {
     // Implement Microsoft OAuth flow
     return { success: true, data: null };
+  }
+
+  async forgotPassword(email: string) {
+    return this.request('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
   }
 
   async updatePassword(userId: string, newPassword: string) {
@@ -189,8 +221,53 @@ class ApiService {
     });
   }
 
+  async castCandidateVote(data: { sessionId: number; candidateId: number; votesToAllocate: number; proxyUserIds?: number[] }) {
+    return this.request('/votes/candidate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async castResolutionVote(data: { sessionId: number; resolutionId: number; voteChoice: 'yes' | 'no' | 'abstain'; votesToAllocate?: number }) {
+    return this.request('/votes/resolution', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async getVotingResults() {
     return this.request('/votes/results');
+  }
+
+  async getActiveSession() {
+    return this.request('/sessions?status=in_progress');
+  }
+
+  async getUserVoteAllocation(sessionId: number) {
+    return this.request(`/votes/allocation/${sessionId}`);
+  }
+
+  async getVoteWeightForUser(userId: number, sessionId: number) {
+    return this.request(`/proxy/vote-weight/${userId}/${sessionId}`);
+  }
+
+  async recordBlockchainVote(voteData: any) {
+    return this.request('/blockchain/record-vote', {
+      method: 'POST',
+      body: JSON.stringify(voteData),
+    });
+  }
+
+  async verifyBlockchainVote(hash: string) {
+    return this.request(`/blockchain/verify/${encodeURIComponent(hash)}`);
+  }
+
+  async getBlockchainVote(voteId: string) {
+    return this.request(`/blockchain/vote/${encodeURIComponent(voteId)}`);
+  }
+
+  async getBlockchainChain(sessionId: number) {
+    return this.request(`/blockchain/chain/${sessionId}`);
   }
 
   // Proxy endpoints
@@ -319,9 +396,32 @@ class ApiService {
     });
   }
 
+  async updateSession(sessionId: number, data: any) {
+    return this.request(`/sessions/${sessionId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async startSession(sessionId: number) {
+    return this.request(`/sessions/${sessionId}/start`, { method: 'POST' });
+  }
+
+  async endSession(sessionId: number) {
+    return this.request(`/sessions/${sessionId}/end`, { method: 'POST' });
+  }
+
+  async resetSession(sessionId: number) {
+    return this.request(`/sessions/${sessionId}/reset`, { method: 'POST' });
+  }
+
+  async getAllocationStatistics(sessionId: number) {
+    return this.request(`/allocations/statistics/${sessionId}`);
+  }
+
   // Vote Allocations
   async getVoteAllocations(sessionId?: number) {
-    const endpoint = sessionId ? `/allocations?sessionId=${sessionId}` : '/allocations';
+    const endpoint = sessionId ? `/allocations/session/${sessionId}` : '/allocations/session/1';
     return this.request(endpoint);
   }
 
@@ -337,10 +437,9 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({
         userId,
-        allocatedVotes: votes,
         sessionId,
-        reason: 'Admin assignment',
-        basedOn: 'ADMIN_ALLOCATION'
+        maxCandidateVotes: votes,
+        maxResolutionVotes: votes,
       }),
     });
   }
@@ -373,12 +472,12 @@ class ApiService {
     if (filters?.limit) params.append('limit', filters.limit.toString());
     
     const queryString = params.toString();
-    return this.request(`/audit-logs${queryString ? `?${queryString}` : ''}`);
+    return this.request(`/audit-logs/logs${queryString ? `?${queryString}` : ''}`);
   }
 
   // Proxy Groups
   async getProxyGroups() {
-    return this.request('/proxy/groups');
+    return this.request('/proxy/assignments');
   }
 
   async getProxyAssignments(userId?: number) {
@@ -392,14 +491,26 @@ class ApiService {
 
   // Attendance Tracking
   async getAttendance(sessionId: number) {
-    return this.request(`/attendance/${sessionId}`);
+    return this.request(`/attendance/session/${sessionId}`);
+  }
+
+  async getAttendanceHistory(userId: number) {
+    return this.request(`/attendance/history/${userId}`);
   }
 
   async markAttendance(attendanceData: any) {
-    return this.request('/attendance', {
+    return this.request('/attendance/check-in', {
       method: 'POST',
       body: JSON.stringify(attendanceData),
     });
+  }
+
+  async getQuorum(sessionId: number) {
+    return this.request(`/audit/quorum/${sessionId}`);
+  }
+
+  async getAuditStats() {
+    return this.request('/audit/stats');
   }
 
   // Generic HTTP methods for flexibility

@@ -14,7 +14,7 @@ const config = {
   driver: process.env.DB_DRIVER || 'msnodesqlv8', // Support ODBC Driver specification
   options: {
     encrypt: process.env.DB_ENCRYPT === 'true' || process.env.DB_ENCRYPT === 'yes',
-    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true' || process.env.DB_TRUST_SERVER_CERTIFICATE === 'no' ? false : true,
+    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE === 'true' || process.env.DB_TRUST_SERVER_CERTIFICATE === 'yes',
     enableArithAbort: true,
     connectionTimeout: parseInt(process.env.DB_CONNECTION_TIMEOUT) || 30000,
     requestTimeout: parseInt(process.env.DB_REQUEST_TIMEOUT) || 30000
