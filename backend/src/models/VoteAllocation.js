@@ -13,7 +13,9 @@ class VoteAllocation {
     try {
       const pool = await getPool();
       
-      const { userId, sessionId, maxCandidateVotes, maxResolutionVotes, allowSplitVoting, notes } = allocationData;
+      // Accept either allocatedVotes or maxCandidateVotes/maxResolutionVotes (use the highest value)
+      const { userId, sessionId, allocatedVotes: av, maxCandidateVotes, maxResolutionVotes, notes } = allocationData;
+      const allocatedVotes = av || maxCandidateVotes || maxResolutionVotes || 1;
 
       // Check if allocation already exists
       const existingCheck = await pool.request()
@@ -30,18 +32,13 @@ class VoteAllocation {
         const result = await pool.request()
           .input('userId', sql.Int, userId)
           .input('sessionId', sql.Int, sessionId)
-          .input('maxCandidateVotes', sql.Int, maxCandidateVotes)
-          .input('maxResolutionVotes', sql.Int, maxResolutionVotes)
-          .input('allowSplitVoting', sql.Bit, allowSplitVoting || false)
+          .input('allocatedVotes', sql.Int, allocatedVotes)
           .input('notes', sql.NVarChar, notes || null)
           .input('updatedAt', sql.DateTime, new Date())
           .query(`
             UPDATE VoteAllocations
             SET 
-              MaxCandidateVotes = @maxCandidateVotes,
-              MaxResolutionVotes = @maxResolutionVotes,
-              AllowSplitVoting = @allowSplitVoting,
-              Notes = @notes,
+              AllocatedVotes = @allocatedVotes,
               UpdatedAt = @updatedAt
             WHERE UserID = @userId AND SessionID = @sessionId;
 
@@ -55,18 +52,13 @@ class VoteAllocation {
         const result = await pool.request()
           .input('userId', sql.Int, userId)
           .input('sessionId', sql.Int, sessionId)
-          .input('maxCandidateVotes', sql.Int, maxCandidateVotes)
-          .input('maxResolutionVotes', sql.Int, maxResolutionVotes)
-          .input('allowSplitVoting', sql.Bit, allowSplitVoting || false)
-          .input('notes', sql.NVarChar, notes || null)
+          .input('allocatedVotes', sql.Int, allocatedVotes)
           .query(`
             INSERT INTO VoteAllocations (
-              UserID, SessionID, MaxCandidateVotes, MaxResolutionVotes, 
-              AllowSplitVoting, Notes, CreatedAt
+              UserID, SessionID, AllocatedVotes, CreatedAt
             )
             VALUES (
-              @userId, @sessionId, @maxCandidateVotes, @maxResolutionVotes,
-              @allowSplitVoting, @notes, GETDATE()
+              @userId, @sessionId, @allocatedVotes, GETDATE()
             );
 
             SELECT * FROM VoteAllocations WHERE AllocationID = SCOPE_IDENTITY();
@@ -93,10 +85,9 @@ class VoteAllocation {
             va.AllocationID,
             va.UserID,
             va.SessionID,
-            va.MaxCandidateVotes,
-            va.MaxResolutionVotes,
-            va.AllowSplitVoting,
-            va.Notes,
+            va.AllocatedVotes,
+            va.AllocatedVotes AS MaxCandidateVotes,
+            va.AllocatedVotes AS MaxResolutionVotes,
             va.CreatedAt,
             va.UpdatedAt,
             u.FirstName + ' ' + u.LastName AS UserName,
@@ -106,8 +97,8 @@ class VoteAllocation {
             (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID) AS CandidateVotesUsed,
             (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID) AS ResolutionVotesUsed,
             -- Remaining votes
-            (va.MaxCandidateVotes - (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID)) AS CandidateVotesRemaining,
-            (va.MaxResolutionVotes - (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID)) AS ResolutionVotesRemaining
+            (va.AllocatedVotes - (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID)) AS CandidateVotesRemaining,
+            (va.AllocatedVotes - (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID)) AS ResolutionVotesRemaining
           FROM VoteAllocations va
           INNER JOIN Users u ON va.UserID = u.UserID
           WHERE va.SessionID = @sessionId
@@ -132,12 +123,15 @@ class VoteAllocation {
         .query(`
           SELECT 
             va.*,
-            -- Current vote usage
-            (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID) AS CandidateVotesUsed,
-            (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID) AS ResolutionVotesUsed,
-            -- Remaining votes (use AllocatedVotes for all)
-            (va.AllocatedVotes - (SELECT COUNT(*) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID)) AS CandidateVotesRemaining,
-            (va.AllocatedVotes - (SELECT COUNT(*) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID)) AS ResolutionVotesRemaining,
+            -- Total vote weight already spent (SUM of VotesAllocated, not COUNT of rows)
+            ISNULL((SELECT SUM(cv.VotesAllocated) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID AND cv.IsProxyVote = 0), 0) AS CandidateVotesUsed,
+            ISNULL((SELECT SUM(rv.VotesAllocated) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID AND rv.IsProxyVote = 0), 0) AS ResolutionVotesUsed,
+            -- Combined total spent across both vote types
+            ISNULL((SELECT SUM(cv.VotesAllocated) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID AND cv.IsProxyVote = 0), 0) +
+            ISNULL((SELECT SUM(rv.VotesAllocated) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID AND rv.IsProxyVote = 0), 0) AS TotalVotesSpent,
+            -- Remaining votes
+            (va.AllocatedVotes - ISNULL((SELECT SUM(cv.VotesAllocated) FROM CandidateVotes cv WHERE cv.VoterUserID = va.UserID AND cv.SessionID = va.SessionID AND cv.IsProxyVote = 0), 0)) AS CandidateVotesRemaining,
+            (va.AllocatedVotes - ISNULL((SELECT SUM(rv.VotesAllocated) FROM ResolutionVotes rv WHERE rv.VoterUserID = va.UserID AND rv.SessionID = va.SessionID AND rv.IsProxyVote = 0), 0)) AS ResolutionVotesRemaining,
             va.AllocatedVotes AS MaxCandidateVotes,
             va.AllocatedVotes AS MaxResolutionVotes
           FROM VoteAllocations va

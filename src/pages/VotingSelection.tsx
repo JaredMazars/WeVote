@@ -15,14 +15,20 @@ const VotingSelection: React.FC = () => {
 
   useEffect(() => {
     checkAGMStatus();
+    // Poll every 5 s so the page auto-unlocks when admin starts the session
+    const interval = setInterval(checkAGMStatus, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const checkAGMStatus = async () => {
     try {
-      const response = await api.get('/sessions?status=in_progress');
-      const sessions = (response.data as any)?.sessions || [];
+      const response = await api.getActiveSession();
+      // api transforms {count, sessions:[...]} → data = sessions array
+      const sessions = Array.isArray(response.data) ? response.data : ((response.data as any)?.sessions || []);
       if (sessions.length === 0) {
         setShowClosedModal(true);
+      } else {
+        setShowClosedModal(false);
       }
     } catch (error) {
       console.error('Error checking AGM status:', error);

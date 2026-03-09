@@ -38,6 +38,8 @@ interface User {
   id: number;
   email: string;
   name: string;
+  role: string;
+  isGoodStanding: boolean;
   employeeId?: string;
   createdAt: string;
   lastLogin?: string;
@@ -137,7 +139,8 @@ const AdminDashboard: React.FC = () => {
   const [showVoteModal, setShowVoteModal] = useState(false);
   const [selectedUserForVotes, setSelectedUserForVotes] = useState<User | null>(null);
   const [voteAmount, setVoteAmount] = useState(1);
-  const [voteLimits, setVoteLimits] = useState({ min: 1, max: 10, default: 3 });
+  const [voteLimits, setVoteLimits] = useState({ min: 2, max: 4, default: 2 });
+  const [userVotesUsed, setUserVotesUsed] = useState(0); // votes already cast by user in active session
 
   // AGM Timer state
   const [showSetTimerModal, setShowSetTimerModal] = useState(false);
@@ -155,6 +158,10 @@ const AdminDashboard: React.FC = () => {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
   const [editingResolution, setEditingResolution] = useState<Resolution | null>(null);
+
+  // User Actions Modal
+  const [showActionsModal, setShowActionsModal] = useState(false);
+  const [actionsTargetUser, setActionsTargetUser] = useState<User | null>(null);
 
   // Live quorum and attendance tracking
   const [liveAttendanceCount, setLiveAttendanceCount] = useState(0);
@@ -252,7 +259,10 @@ const AdminDashboard: React.FC = () => {
       return;
     }
     try {
-      const response = await api.startSession(activeSessionId);
+      // If the session has already been ended, resume it; otherwise start fresh
+      const response = timerStatus === 'ended'
+        ? await api.resumeSession(activeSessionId)
+        : await api.startSession(activeSessionId);
       if (response.success) {
         setTimerStatus('running');
       } else {
@@ -269,6 +279,7 @@ const AdminDashboard: React.FC = () => {
       alert('Timer is not currently running.');
       return;
     }
+    if (!confirm('Are you sure you want to END the AGM session? This will close voting for all participants and cannot be undone.')) return;
     try {
       const response = await api.endSession(activeSessionId);
       if (response.success) {
@@ -323,25 +334,19 @@ const AdminDashboard: React.FC = () => {
 
   const loadData = async () => {
     try {
-      // Load vote limits from active session's allocation statistics
+      // Load vote limits from global vote-splitting settings (set by Super Admin)
       try {
-        const activeRes = await api.getActiveSession();
-        const activeSession = activeRes.success && activeRes.data
-          ? (Array.isArray(activeRes.data) ? activeRes.data[0] : activeRes.data)
-          : null;
-        if (activeSession?.SessionID) {
-          const statsRes = await api.getAllocationStatistics(activeSession.SessionID);
-          if (statsRes.success && (statsRes.data as any)?.statistics) {
-            const stats = (statsRes.data as any).statistics;
-            setVoteLimits({
-              min: stats.minAllocated ?? 1,
-              max: stats.maxAllocated ?? 10,
-              default: stats.avgAllocated ? Math.round(stats.avgAllocated) : 3
-            });
-          }
+        const limitsRes = await api.getVoteLimits();
+        if (limitsRes.success && limitsRes.data) {
+          const d = limitsRes.data as any;
+          setVoteLimits({
+            min: d.minVotes ?? 2,
+            max: d.maxVotes ?? 4,
+            default: d.minVotes ?? 2
+          });
         }
       } catch {
-        // Fall back to defaults if statistics unavailable
+        // Fall back to defaults if unavailable
       }
 
       // Load data from API based on active tab
@@ -386,6 +391,8 @@ const AdminDashboard: React.FC = () => {
           id: user.UserID,
           email: user.Email,
           name: `${user.FirstName} ${user.LastName}`,
+          role: user.Role || 'user',
+          isGoodStanding: user.IsGoodStanding === undefined ? false : !!user.IsGoodStanding,
           employeeId: user.EmployeeID || undefined,
           createdAt: user.CreatedAt,
           lastLogin: user.LastLogin || undefined,
@@ -626,18 +633,20 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (confirm('Are you sure you want to delete this user?')) {
-      try {
-        const response = await api.deleteUser(userId);
-        if (response.success) {
-          await loadUsers(); // Reload users to reflect deletion
-        } else {
-          alert(response.message || 'Failed to delete user');
-        }
-      } catch (error) {
-        console.error('Error deleting user:', error);
-        alert('Failed to delete user');
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    if (user.isActive && !confirm(`Deactivate ${user.name}? They will no longer be able to log in.`)) return;
+    if (!user.isActive && !confirm(`Reactivate ${user.name}?`)) return;
+    try {
+      const response = await api.toggleUserStatus(userId, !user.isActive);
+      if (response.success) {
+        await loadUsers();
+      } else {
+        alert(response.message || 'Failed to update user status');
       }
+    } catch (error) {
+      console.error('Error updating user status:', error);
+      alert('Failed to update user status');
     }
   };
 
@@ -655,6 +664,64 @@ const AdminDashboard: React.FC = () => {
     } catch (error) {
       console.error('Error toggling user status:', error);
       alert('Failed to toggle user status');
+    }
+  };
+
+  const handlePromoteUser = async (userId: number, targetRole: string) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    const label = targetRole === 'voter' ? 'approve as voter' : 'demote to user';
+    if (!confirm(`Are you sure you want to ${label} for ${user.name}?`)) return;
+    try {
+      const response = await api.promoteUser(userId, targetRole);
+      if (response.success) {
+        await loadUsers();
+      } else {
+        alert(response.message || 'Failed to update user role');
+      }
+    } catch (error) {
+      console.error('Error updating user role:', error);
+      alert('Failed to update user role');
+    }
+  };
+
+  const handleResetPassword = async (userId: number, email: string) => {
+    if (!confirm(`Reset password for ${email}?\n\nA new temporary password will be generated. Please share it securely with the user.`)) return;
+    try {
+      const response = await api.resetUserPassword(userId);
+      if (response.success) {
+        // Backend returns newPassword at top level (not nested under data)
+        const newPassword = (response as any)?.newPassword || (response.data as any)?.newPassword;
+        if (newPassword) {
+          alert(`Password reset for ${email}\n\nNew temporary password:\n${newPassword}\n\nPlease share this securely. The user should change it after logging in.`);
+        } else {
+          alert(`Password reset successfully for ${email}.`);
+        }
+      } else {
+        alert(response.message || 'Failed to reset password');
+      }
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      alert('Failed to reset password');
+    }
+  };
+
+  const handleGoodStandingToggle = async (userId: number) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    const newState = !user.isGoodStanding;
+    const note = newState ? '' : prompt(`Reason for revoking good standing for ${user.name} (optional):`) ?? '';
+    if (!confirm(`${newState ? 'Restore good standing' : 'Revoke good standing'} for ${user.name}?`)) return;
+    try {
+      const response = await api.setGoodStanding(userId, newState, note || undefined);
+      if (response.success) {
+        await loadUsers();
+      } else {
+        alert(response.message || 'Failed to update good standing');
+      }
+    } catch (error) {
+      console.error('Error updating good standing:', error);
+      alert('Failed to update good standing');
     }
   };
 
@@ -1145,7 +1212,7 @@ const AdminDashboard: React.FC = () => {
               }`}
             >
               <Play className="h-5 w-5" />
-              <span>Start Timer</span>
+              <span>{timerStatus === 'ended' ? 'Resume Session' : 'Start Timer'}</span>
             </motion.button>
 
             {/* End Timer Button */}
@@ -1299,87 +1366,87 @@ const AdminDashboard: React.FC = () => {
         >
           {activeTab === 'users' && (
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="min-w-max w-full">
                 <thead className="bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white">
                   <tr>
-                    <th className="px-6 py-4 text-left">ID</th>
-                    <th className="px-6 py-4 text-left">Name</th>
-                    <th className="px-6 py-4 text-left">Email</th>
-                    <th className="px-6 py-4 text-left">Employee ID</th>
-                    <th className="px-6 py-4 text-left">Assigned Votes</th>
-                    <th className="px-6 py-4 text-left">Status</th>
-                    <th className="px-6 py-4 text-left">Actions</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap w-16">ID</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap min-w-[160px]">Name</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap min-w-[220px]">Email</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap min-w-[110px]">Role</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap min-w-[160px]">Standing</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap min-w-[100px]">Votes</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap min-w-[90px]">Status</th>
+                    <th className="px-4 py-3 text-left text-sm font-semibold whitespace-nowrap sticky right-0 bg-[#171C8F] z-10 shadow-[-4px_0_8px_rgba(0,0,0,0.15)] w-[110px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filterData(users, ['name', 'email', 'employeeId']).map((user, index) => (
                     <tr key={user.id} className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}>
-                      <td className="px-6 py-4 font-semibold text-[#464B4B]">{user.id}</td>
-                      <td className="px-6 py-4 text-[#464B4B] font-semibold">{user.name}</td>
-                      <td className="px-6 py-4 text-[#464B4B]">{user.email}</td>
-                      <td className="px-6 py-4 text-[#464B4B]">{user.employeeId || '-'}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center space-x-2">
-                          <span className={`px-4 py-2 rounded-xl text-sm font-bold ${
+                      <td className="px-4 py-3 font-semibold text-[#464B4B] whitespace-nowrap">{user.id}</td>
+                      <td className="px-4 py-3 text-[#464B4B] font-semibold whitespace-nowrap">{user.name}</td>
+                      <td className="px-4 py-3 text-[#464B4B] whitespace-nowrap">{user.email}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          user.role === 'voter' ? 'bg-green-100 text-green-700' :
+                          user.role === 'admin' || user.role === 'super_admin' ? 'bg-purple-100 text-purple-700' :
+                          user.role === 'auditor' ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-500'
+                        }`}>
+                          {user.role === 'voter' ? '✓ Voter' : user.role === 'super_admin' ? 'Super Admin' : user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        {user.role === 'voter' ? (
+                          <motion.button
+                            whileHover={{ scale: 1.03 }}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={() => handleGoodStandingToggle(user.id)}
+                            title={user.isGoodStanding ? 'Click to revoke good standing' : 'Click to restore good standing'}
+                            className={`px-3 py-1 rounded-full text-xs font-semibold cursor-pointer transition-colors ${
+                              user.isGoodStanding
+                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                : 'bg-red-100 text-red-700 hover:bg-red-200'
+                            }`}
+                          >
+                            {user.isGoodStanding ? '✔ Good Standing' : '✖ Not in Standing'}
+                          </motion.button>
+                        ) : user.role === 'user' ? (
+                          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                            ⏳ Pending Approval
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-400">
+                            N/A
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <span className={`px-3 py-1 rounded-xl text-xs font-bold ${
                             user.assignedVotes 
-                              ? 'bg-gradient-to-r from-blue-100 to-blue-100 text-blue-800' 
+                              ? 'bg-blue-100 text-blue-800' 
                               : 'bg-gray-100 text-gray-500'
                           }`}>
-                            {user.assignedVotes ? `${user.assignedVotes} vote${user.assignedVotes !== 1 ? 's' : ''}` : 'Not assigned'}
+                            {user.assignedVotes ? `${user.assignedVotes} vote${user.assignedVotes !== 1 ? 's' : ''}` : '—'}
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                           user.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                         }`}>
                           {user.isActive ? 'Active' : 'Inactive'}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => handleToggleUserStatus(user.id)}
-                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
-                              user.isActive ? 'bg-orange-100 text-orange-700 hover:bg-orange-200' : 'bg-green-100 text-green-700 hover:bg-green-200'
-                            }`}
-                          >
-                            {user.isActive ? '⏸️' : '▶️'}
-                          </motion.button>
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => {
-                              setSelectedUserForVotes(user);
-                              setVoteAmount(user.assignedVotes || voteLimits.default);
-                              setShowVoteModal(true);
-                            }}
-                            className="px-3 py-1 bg-gradient-to-r from-blue-100 to-blue-100 text-blue-700 rounded-lg hover:from-blue-200 hover:to-blue-200 transition-colors text-xs font-semibold"
-                          >
-                            🗳️ Votes
-                          </motion.button>
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => {
-                              setEditingUser(user);
-                              setShowUserModal(true);
-                            }}
-                            className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors text-xs font-semibold"
-                          >
-                            ✏️ Edit
-                          </motion.button>
-                          <motion.button
-                            whileHover={{ scale: 1.05 }}
-                            whileTap={{ scale: 0.95 }}
-                            onClick={() => handleDeleteUser(user.id)}
-                            className="px-3 py-1 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors text-xs font-semibold"
-                          >
-                            🗑️
-                          </motion.button>
-                        </div>
+                      <td className="px-4 py-3 sticky right-0 bg-inherit z-10 shadow-[-4px_0_6px_rgba(0,0,0,0.08)] whitespace-nowrap w-[110px]">
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => { setActionsTargetUser(user); setShowActionsModal(true); }}
+                          className="px-3 py-1.5 bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-sm"
+                        >
+                          ⋯ Actions
+                        </motion.button>
                       </td>
                     </tr>
                   ))}
@@ -2833,11 +2900,25 @@ const AdminDashboard: React.FC = () => {
                     <Shield className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
                     <div className="text-sm text-blue-800">
                       <p className="font-bold mb-1">Super Admin Set Boundaries</p>
-                      <p>You can assign between <strong>{voteLimits.min}</strong> and <strong>{voteLimits.max}</strong> votes per user.</p>
+                      <p>You can assign between <strong>{Math.max(voteLimits.min, userVotesUsed)}</strong> and <strong>{voteLimits.max}</strong> votes per user.</p>
                       <p className="text-xs text-blue-600 mt-1">Recommended default: {voteLimits.default} votes</p>
                     </div>
                   </div>
                 </div>
+
+                {/* Votes Already Cast Warning */}
+                {userVotesUsed > 0 && (
+                  <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 mb-6">
+                    <div className="flex items-start space-x-3">
+                      <span className="text-amber-600 text-lg flex-shrink-0">⚠️</span>
+                      <div className="text-sm text-amber-800">
+                        <p className="font-bold mb-1">User Has Already Voted</p>
+                        <p>This user has cast <strong>{userVotesUsed}</strong> vote(s) in this session.</p>
+                        <p className="text-xs text-amber-600 mt-1">You can only increase the allocation. Setting it below {userVotesUsed} will be rejected.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Vote Input */}
                 <div className="mb-6">
@@ -2847,8 +2928,8 @@ const AdminDashboard: React.FC = () => {
                   <input
                     type="number"
                     value={voteAmount}
-                    onChange={(e) => setVoteAmount(parseInt(e.target.value) || voteLimits.min)}
-                    min={voteLimits.min}
+                    onChange={(e) => setVoteAmount(parseInt(e.target.value) || Math.max(voteLimits.min, userVotesUsed))}
+                    min={Math.max(voteLimits.min, userVotesUsed)}
                     max={voteLimits.max}
                     className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-500 focus:border-[#0072CE] text-3xl font-bold text-center"
                   />
@@ -2859,21 +2940,21 @@ const AdminDashboard: React.FC = () => {
                       type="range"
                       value={voteAmount}
                       onChange={(e) => setVoteAmount(parseInt(e.target.value))}
-                      min={voteLimits.min}
+                      min={Math.max(voteLimits.min, userVotesUsed)}
                       max={voteLimits.max}
                       className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-[#0072CE]"
                     />
                     <div className="flex justify-between mt-2 text-xs text-[#464B4B]/60">
-                      <span>Min: {voteLimits.min}</span>
+                      <span>Min: {Math.max(voteLimits.min, userVotesUsed)}{userVotesUsed > voteLimits.min ? ' (votes used)' : ''}</span>
                       <span>Default: {voteLimits.default}</span>
                       <span>Max: {voteLimits.max}</span>
                     </div>
                   </div>
 
                   {/* Validation Message */}
-                  {(voteAmount < voteLimits.min || voteAmount > voteLimits.max) && (
+                  {(voteAmount < Math.max(voteLimits.min, userVotesUsed) || voteAmount > voteLimits.max) && (
                     <div className="mt-4 p-3 bg-red-50 border-2 border-red-200 rounded-xl text-red-800 text-sm">
-                      ⚠️ Vote count must be between {voteLimits.min} and {voteLimits.max}
+                      ⚠️ Vote count must be between {Math.max(voteLimits.min, userVotesUsed)} and {voteLimits.max}
                     </div>
                   )}
                   {voteAmount === voteLimits.default && (
@@ -2888,10 +2969,10 @@ const AdminDashboard: React.FC = () => {
                   <p className="text-sm font-semibold text-[#464B4B] mb-3">Quick Select:</p>
                   <div className="flex gap-2 flex-wrap">
                     <button
-                      onClick={() => setVoteAmount(voteLimits.min)}
+                      onClick={() => setVoteAmount(Math.max(voteLimits.min, userVotesUsed))}
                       className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-xl font-semibold text-[#464B4B] transition-colors"
                     >
-                      Min ({voteLimits.min})
+                      Min ({Math.max(voteLimits.min, userVotesUsed)})
                     </button>
                     <button
                       onClick={() => setVoteAmount(voteLimits.default)}
@@ -2922,10 +3003,12 @@ const AdminDashboard: React.FC = () => {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={async () => {
-                      if (voteAmount >= voteLimits.min && voteAmount <= voteLimits.max) {
+                      const effectiveMin = Math.max(voteLimits.min, userVotesUsed);
+                      if (voteAmount >= effectiveMin && voteAmount <= voteLimits.max) {
                         try {
-                          // Call backend API to assign votes
-                          const response = await api.assignVotes(selectedUserForVotes.id, voteAmount, 1); // Session ID 1
+                          // Call backend API to assign votes (use active session or fallback to 1)
+                          const sessionId = activeSessionId || 1;
+                          const response = await api.assignVotes(selectedUserForVotes.id, voteAmount, sessionId);
                           
                           if (response.success) {
                             // Update local state
@@ -2942,7 +3025,7 @@ const AdminDashboard: React.FC = () => {
                               detail: {
                                 userId: selectedUserForVotes.id,
                                 allocatedVotes: voteAmount,
-                                sessionId: 1
+                                sessionId: activeSessionId || 1
                               }
                             }));
                             
@@ -2951,15 +3034,16 @@ const AdminDashboard: React.FC = () => {
                           } else {
                             alert(`❌ Failed to assign votes: ${response.message || 'Unknown error'}`);
                           }
-                        } catch (error) {
+                        } catch (error: any) {
                           console.error('Error assigning votes:', error);
-                          alert('❌ Failed to assign votes. Please try again.');
+                          alert(`❌ Failed to assign votes: ${error?.message || 'Please try again.'}`);
                         }
                       } else {
-                        alert(`⚠️ Vote count must be between ${voteLimits.min} and ${voteLimits.max}`);
+                        const effectiveMin2 = Math.max(voteLimits.min, userVotesUsed);
+                        alert(`⚠️ Vote count must be between ${effectiveMin2} and ${voteLimits.max}${userVotesUsed > 0 ? ` (user has already cast ${userVotesUsed} votes)` : ''}`);
                       }
                     }}
-                    disabled={voteAmount < voteLimits.min || voteAmount > voteLimits.max}
+                    disabled={voteAmount < Math.max(voteLimits.min, userVotesUsed) || voteAmount > voteLimits.max}
                     className="flex-1 flex items-center justify-center space-x-2 px-6 py-4 bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white rounded-xl font-semibold hover:shadow-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <Vote className="h-5 w-5" />
@@ -3163,6 +3247,179 @@ const AdminDashboard: React.FC = () => {
                 }
               }}
             />
+          )}
+        </AnimatePresence>
+
+        {/* USER ACTIONS MODAL */}
+        <AnimatePresence>
+          {showActionsModal && actionsTargetUser && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              onClick={() => setShowActionsModal(false)}
+            >
+              <motion.div
+                initial={{ scale: 0.9, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.9, y: 20 }}
+                className="bg-white rounded-3xl shadow-2xl p-6 max-w-sm w-full"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between mb-5">
+                  <div>
+                    <h2 className="text-lg font-bold text-[#171C8F]">{actionsTargetUser.name}</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">{actionsTargetUser.email}</p>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        actionsTargetUser.role === 'voter' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {actionsTargetUser.role === 'voter' ? '🗳️ Voter' : '👤 User'}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                        actionsTargetUser.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                        {actionsTargetUser.isActive ? 'Active' : 'Inactive'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowActionsModal(false)}
+                    className="text-gray-400 hover:text-gray-600 transition-colors text-xl font-bold leading-none"
+                  >✕</button>
+                </div>
+
+                <div className="space-y-2">
+                  {/* Manage Votes */}
+                  <motion.button
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={async () => {
+                      setShowActionsModal(false);
+                      setSelectedUserForVotes(actionsTargetUser);
+                      setVoteAmount(actionsTargetUser.assignedVotes || voteLimits.default);
+                      setUserVotesUsed(0);
+                      try {
+                        const sid = activeSessionId || 1;
+                        const allocRes = await api.getUserAllocation(actionsTargetUser.id, sid);
+                        const alloc = (allocRes as any)?.data?.allocation || (allocRes as any)?.allocation || (allocRes as any)?.data;
+                        setUserVotesUsed(alloc?.TotalVotesSpent || 0);
+                      } catch {/* non-fatal */}
+                      setShowVoteModal(true);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors text-left"
+                  >
+                    <span className="text-xl">🗳️</span>
+                    <div>
+                      <p className="text-sm font-semibold text-blue-800">Manage Votes</p>
+                      <p className="text-xs text-blue-600">Assign or adjust vote allocation</p>
+                    </div>
+                  </motion.button>
+
+                  {/* Edit User */}
+                  <motion.button
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => {
+                      setShowActionsModal(false);
+                      setEditingUser(actionsTargetUser);
+                      setShowUserModal(true);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 bg-slate-50 hover:bg-slate-100 rounded-xl transition-colors text-left"
+                  >
+                    <span className="text-xl">✏️</span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Edit User</p>
+                      <p className="text-xs text-slate-500">Update name, email and profile details</p>
+                    </div>
+                  </motion.button>
+
+                  {/* Approve as Voter (only for role='user') */}
+                  {actionsTargetUser.role === 'user' && (
+                    <motion.button
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => {
+                        setShowActionsModal(false);
+                        handlePromoteUser(actionsTargetUser.id, 'voter');
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 bg-green-50 hover:bg-green-100 rounded-xl transition-colors text-left"
+                    >
+                      <span className="text-xl">✔️</span>
+                      <div>
+                        <p className="text-sm font-semibold text-green-800">Approve as Voter</p>
+                        <p className="text-xs text-green-600">Grant full voting access to this user</p>
+                      </div>
+                    </motion.button>
+                  )}
+
+                  {/* Deactivate / Activate */}
+                  <motion.button
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => {
+                      setShowActionsModal(false);
+                      handleDeleteUser(actionsTargetUser.id);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-colors text-left ${
+                      actionsTargetUser.isActive
+                        ? 'bg-orange-50 hover:bg-orange-100'
+                        : 'bg-green-50 hover:bg-green-100'
+                    }`}
+                  >
+                    <span className="text-xl">{actionsTargetUser.isActive ? '🚫' : '✅'}</span>
+                    <div>
+                      <p className={`text-sm font-semibold ${actionsTargetUser.isActive ? 'text-orange-800' : 'text-green-800'}`}>
+                        {actionsTargetUser.isActive ? 'Deactivate User' : 'Activate User'}
+                      </p>
+                      <p className={`text-xs ${actionsTargetUser.isActive ? 'text-orange-600' : 'text-green-600'}`}>
+                        {actionsTargetUser.isActive
+                          ? 'Block login access temporarily — no re-approval needed to restore'
+                          : 'Restore login access immediately — no re-approval required'}
+                      </p>
+                    </div>
+                  </motion.button>
+
+                  {/* Revoke Voter (only for role='voter') */}
+                  {actionsTargetUser.role === 'voter' && (
+                    <motion.button
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      onClick={() => {
+                        setShowActionsModal(false);
+                        handlePromoteUser(actionsTargetUser.id, 'user');
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-3 bg-red-50 hover:bg-red-100 rounded-xl transition-colors text-left"
+                    >
+                      <span className="text-xl">✕</span>
+                      <div>
+                        <p className="text-sm font-semibold text-red-800">Revoke Voter Access</p>
+                        <p className="text-xs text-red-600">Demotes to pending user — returns to approval queue</p>
+                      </div>
+                    </motion.button>
+                  )}
+
+                  {/* Reset Password */}
+                  <motion.button
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    onClick={() => {
+                      setShowActionsModal(false);
+                      handleResetPassword(actionsTargetUser.id, actionsTargetUser.email);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 bg-yellow-50 hover:bg-yellow-100 rounded-xl transition-colors text-left"
+                  >
+                    <span className="text-xl">🔑</span>
+                    <div>
+                      <p className="text-sm font-semibold text-yellow-800">Reset Password</p>
+                      <p className="text-xs text-yellow-600">Generate and send a new temporary password by email</p>
+                    </div>
+                  </motion.button>
+                </div>
+              </motion.div>
+            </motion.div>
           )}
         </AnimatePresence>
       </div>

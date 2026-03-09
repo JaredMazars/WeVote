@@ -659,8 +659,8 @@ BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
 
-        -- Check if session is active
-        IF NOT EXISTS (SELECT 1 FROM AGMSessions WHERE SessionID = @SessionID AND Status = 'active')
+        -- Check if session is active (accepts both 'active' and 'in_progress')
+        IF NOT EXISTS (SELECT 1 FROM AGMSessions WHERE SessionID = @SessionID AND Status IN ('active', 'in_progress'))
         BEGIN
             RAISERROR('Session is not active', 16, 1);
             RETURN;
@@ -759,8 +759,8 @@ BEGIN
             RETURN;
         END
 
-        -- Check if session is active
-        IF NOT EXISTS (SELECT 1 FROM AGMSessions WHERE SessionID = @SessionID AND Status = 'active')
+        -- Check if session is active (accepts both 'active' and 'in_progress')
+        IF NOT EXISTS (SELECT 1 FROM AGMSessions WHERE SessionID = @SessionID AND Status IN ('active', 'in_progress'))
         BEGIN
             RAISERROR('Session is not active', 16, 1);
             RETURN;

@@ -74,7 +74,7 @@ const sendAdminCredentialsEmail = async ({ email, firstName, password, role }) =
               </div>
               
               <div style="text-align: center;">
-                <a href="${loginUrl}/login" class="button">Login to WeVote</a>
+                <a href="${loginUrl}/login" class="button" style="color: white;">Login to WeVote</a>
               </div>
               
               <p style="margin-top: 30px;"><strong>Next Steps:</strong></p>
@@ -164,7 +164,7 @@ const sendUserApprovalEmail = async ({ email, firstName, password }) => {
               </div>
               
               <div style="text-align: center;">
-                <a href="${loginUrl}/login" class="button">Login to WeVote</a>
+                <a href="${loginUrl}/login" class="button" style="color: white;">Login to WeVote</a>
               </div>
               
               <p style="margin-top: 30px;"><strong>Next Steps:</strong></p>
@@ -274,7 +274,7 @@ const sendSessionAssignmentEmail = async ({ email, firstName, sessionTitle, sess
               <p>Please log in to the WeVote platform to access your dashboard and manage this session.</p>
               
               <div style="text-align: center;">
-                <a href="${loginUrl}/login" class="button">Go to Dashboard</a>
+                <a href="${loginUrl}/login" class="button" style="color: white;">Go to Dashboard</a>
               </div>
               
               <p style="margin-top: 30px; color: #666; font-size: 14px;">
@@ -358,7 +358,7 @@ const sendPasswordResetEmail = async ({ email, firstName, tempPassword }) => {
                 ⚠️ <strong>Important:</strong> You will be required to set a new password immediately after logging in. This temporary password expires after first use.
               </div>
               <div style="text-align: center;">
-                <a href="${loginUrl}/login" class="button">Login to WeVote</a>
+                <a href="${loginUrl}/login" class="button" style="color: white;">Login to WeVote</a>
               </div>
               <p>If you did not request a password reset, please contact your administrator immediately.</p>
             </div>
@@ -380,10 +380,217 @@ const sendPasswordResetEmail = async ({ email, firstName, tempPassword }) => {
   }
 };
 
+
+// ─────────────────────────────────────────────────────────────
+// Vote Confirmation Email
+// ─────────────────────────────────────────────────────────────
+const sendVoteConfirmationEmail = async ({ email, firstName, voteType, entityName, voteId, sessionTitle }) => {
+  try {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const receiptUrl = `${frontendUrl}/vote-receipt/${voteId}`;
+    const mailOptions = {
+      from: `"WeVote Platform" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: `✅ Vote Confirmed — ${sessionTitle}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family: Arial, sans-serif; background:#f4f4f4; padding:20px; margin:0;">
+            <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+              <div style="background:linear-gradient(135deg,#0072CE,#171C8F); padding:32px 24px; text-align:center;">
+                <h1 style="color:#ffffff; margin:0; font-size:24px;">Vote Confirmed</h1>
+                <p style="color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;">${sessionTitle}</p>
+              </div>
+              <div style="padding:32px 24px;">
+                <p style="color:#464B4B; font-size:16px;">Dear ${firstName || 'Voter'},</p>
+                <p style="color:#464B4B; font-size:15px;">Your vote has been securely recorded on the WeVote platform.</p>
+                <table style="width:100%; border-collapse:collapse; margin:24px 0; font-size:14px;">
+                  <tr style="background:#f8f9fa;">
+                    <td style="padding:12px 16px; color:#464B4B; font-weight:600; border:1px solid #e9ecef; width:40%;">Vote ID</td>
+                    <td style="padding:12px 16px; color:#0072CE; font-family:monospace; border:1px solid #e9ecef;">#${voteId}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 16px; color:#464B4B; font-weight:600; border:1px solid #e9ecef;">Vote Type</td>
+                    <td style="padding:12px 16px; color:#464B4B; border:1px solid #e9ecef;">${voteType}</td>
+                  </tr>
+                  <tr style="background:#f8f9fa;">
+                    <td style="padding:12px 16px; color:#464B4B; font-weight:600; border:1px solid #e9ecef;">Selection</td>
+                    <td style="padding:12px 16px; color:#464B4B; border:1px solid #e9ecef;">${entityName}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:12px 16px; color:#464B4B; font-weight:600; border:1px solid #e9ecef;">Session</td>
+                    <td style="padding:12px 16px; color:#464B4B; border:1px solid #e9ecef;">${sessionTitle}</td>
+                  </tr>
+                  <tr style="background:#f8f9fa;">
+                    <td style="padding:12px 16px; color:#464B4B; font-weight:600; border:1px solid #e9ecef;">Timestamp</td>
+                    <td style="padding:12px 16px; color:#464B4B; border:1px solid #e9ecef;">${new Date().toUTCString()}</td>
+                  </tr>
+                </table>
+                <div style="text-align:center; margin:28px 0;">
+                  <a href="${receiptUrl}" style="display:inline-block; padding:14px 32px; background:linear-gradient(135deg,#0072CE,#171C8F); color:#ffffff; text-decoration:none; border-radius:10px; font-weight:700; font-size:15px;">
+                    🧾 View Your Vote Receipt →
+                  </a>
+                  <p style="color:#999; font-size:12px; margin-top:10px;">Or copy this link:<br/><span style="color:#0072CE; font-family:monospace; font-size:11px;">${receiptUrl}</span></p>
+                </div>
+                <p style="color:#464B4B; font-size:14px;">Keep this email as permanent proof of your participation. Your receipt URL will always be accessible while the platform is running.</p>
+                <p style="color:#999; font-size:13px; margin-top:24px;">This is an automated message — please do not reply.</p>
+              </div>
+              <div style="background:#f8f9fa; padding:16px 24px; text-align:center; border-top:1px solid #e9ecef;">
+                <p style="color:#999; font-size:12px; margin:0;">WeVote | Forvis Mazars &bull; Secure Digital Voting Platform</p>
+              </div>
+            </div>
+          </body>
+        </html>`
+    };
+    await transporter.sendMail(mailOptions);
+    logger.info(`Vote confirmation email sent to ${email} for vote #${voteId}`);
+    return { success: true };
+  } catch (error) {
+    logger.error('Failed to send vote confirmation email:', error);
+    throw error;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// Registration Acknowledgment Email (sent immediately on signup)
+// ─────────────────────────────────────────────────────────────
+const sendRegistrationAcknowledgmentEmail = async ({ email, firstName }) => {
+  try {
+    const mailOptions = {
+      from: `"WeVote Platform" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: '\u23f3 Registration Received \u2014 Pending Admin Approval',
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family: Arial, sans-serif; background:#f4f4f4; padding:20px; margin:0;">
+            <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+              <div style="background:linear-gradient(135deg,#0072CE,#171C8F); padding:32px 24px; text-align:center;">
+                <h1 style="color:#ffffff; margin:0; font-size:24px;">Registration Received</h1>
+                <p style="color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;">WeVote &#8212; Forvis Mazars</p>
+              </div>
+              <div style="padding:32px 24px;">
+                <p style="color:#464B4B; font-size:16px;">Dear ${firstName || 'Member'},</p>
+                <p style="color:#464B4B; font-size:15px;">Thank you for registering with the WeVote platform. Your application has been received and is currently <strong>pending review</strong> by an administrator.</p>
+                <div style="background:#fefce8; border-left:4px solid #f59e0b; padding:16px; margin:24px 0; border-radius:0 8px 8px 0;">
+                  <p style="margin:0; color:#92400e; font-weight:600; font-size:14px;">&#9203; What happens next?</p>
+                  <ol style="margin:8px 0 0; color:#464B4B; font-size:13px; padding-left:20px;">
+                    <li style="margin-top:6px;">An administrator will review your registration.</li>
+                    <li style="margin-top:6px;">Once approved, you will receive a <strong>second email</strong> containing your login credentials.</li>
+                    <li style="margin-top:6px;">You will be asked to set a new password on your first login.</li>
+                    <li style="margin-top:6px;">You can then log in and participate in voting sessions.</li>
+                  </ol>
+                </div>
+                <p style="color:#464B4B; font-size:14px;">You do not need to take any action at this time. If you have questions, please contact your administrator.</p>
+                <p style="color:#999; font-size:13px; margin-top:24px;">This is an automated message &#8212; please do not reply.</p>
+              </div>
+              <div style="background:#f8f9fa; padding:16px 24px; text-align:center; border-top:1px solid #e9ecef;">
+                <p style="color:#999; font-size:12px; margin:0;">WeVote | Forvis Mazars &bull; Secure Digital Voting Platform</p>
+              </div>
+            </div>
+          </body>
+        </html>`
+    };
+    await transporter.sendMail(mailOptions);
+    logger.info(`Registration acknowledgment email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    logger.error('Failed to send registration acknowledgment email:', error);
+    throw error;
+  }
+};
+
+const sendNotGoodStandingEmail = async ({ email, firstName }) => {
+  try {
+    const mailOptions = {
+      from: `"WeVote Platform" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: '\u26a0\ufe0f Vote Not Recorded \u2014 Account Not in Good Standing',
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family: Arial, sans-serif; background:#f4f4f4; padding:20px; margin:0;">
+            <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+              <div style="background:linear-gradient(135deg,#dc2626,#991b1b); padding:32px 24px; text-align:center;">
+                <h1 style="color:#ffffff; margin:0; font-size:24px;">Vote Not Recorded</h1>
+                <p style="color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;">WeVote \u2014 Forvis Mazars</p>
+              </div>
+              <div style="padding:32px 24px;">
+                <p style="color:#464B4B; font-size:16px;">Dear ${firstName || 'Member'},</p>
+                <p style="color:#464B4B; font-size:15px;">Your recent vote could <strong>not be recorded</strong> because your account is currently <strong>not in good standing</strong>.</p>
+                <div style="background:#fef2f2; border-left:4px solid #dc2626; padding:16px; margin:24px 0; border-radius:0 8px 8px 0;">
+                  <p style="margin:0; color:#dc2626; font-weight:600; font-size:14px;">&#10006; Vote not counted</p>
+                  <p style="margin:4px 0 0; color:#464B4B; font-size:13px;">Please contact your administrator to resolve your account status and restore your voting eligibility.</p>
+                </div>
+                <p style="color:#999; font-size:13px; margin-top:24px;">This is an automated message \u2014 please do not reply.</p>
+              </div>
+              <div style="background:#f8f9fa; padding:16px 24px; text-align:center; border-top:1px solid #e9ecef;">
+                <p style="color:#999; font-size:12px; margin:0;">WeVote | Forvis Mazars &bull; Secure Digital Voting Platform</p>
+              </div>
+            </div>
+          </body>
+        </html>`
+    };
+    await transporter.sendMail(mailOptions);
+    logger.info(`Not-good-standing email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    logger.error('Failed to send not-good-standing email:', error);
+    throw error;
+  }
+};
+
+const sendVoterPromotionEmail = async ({ email, firstName, password }) => {
+  try {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const mailOptions = {
+      from: `"WeVote Platform" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: '✅ Your Account Has Been Approved — You Can Now Vote',
+      html: `
+        <!DOCTYPE html>
+        <html>
+          <body style="font-family: Arial, sans-serif; background:#f4f4f4; padding:20px; margin:0;">
+            <div style="max-width:600px; margin:0 auto; background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 12px rgba(0,0,0,0.08);">
+              <div style="background:linear-gradient(135deg,#0072CE,#171C8F); padding:32px 24px; text-align:center;">
+                <h1 style="color:#ffffff; margin:0; font-size:24px;">You're Approved to Vote!</h1>
+                <p style="color:rgba(255,255,255,0.85); margin:8px 0 0; font-size:14px;">WeVote — Forvis Mazars</p>
+              </div>
+              <div style="padding:32px 24px;">
+                <p style="color:#464B4B; font-size:16px;">Dear ${firstName || 'Member'},</p>
+                <p style="color:#464B4B; font-size:15px;">Great news! Your account has been reviewed and approved. You are now a confirmed voter and can participate in all active AGM sessions.</p>
+                ${password ? `<div style="background:#f0f9ff; border-left:4px solid #0072CE; padding:16px; margin:24px 0; border-radius:0 8px 8px 0;"><p style="margin:0; color:#0072CE; font-weight:600; font-size:14px;">Your login credentials</p><p style="margin:8px 0 0; color:#464B4B; font-size:13px;"><strong>Email:</strong> ${email}</p><p style="margin:4px 0 0; color:#464B4B; font-size:13px;"><strong>Temporary password:</strong> <code style="background:#e8f4fd; padding:2px 6px; border-radius:4px;">${password}</code></p><p style="margin:8px 0 0; color:#464B4B; font-size:12px;">You will be prompted to change your password on first login.</p></div>` : ''}
+                <div style="text-align:center; margin:28px 0;">
+                  <a href="${frontendUrl}/login" style="display:inline-block; padding:14px 32px; background:linear-gradient(135deg,#0072CE,#171C8F); color:#ffffff; text-decoration:none; border-radius:10px; font-weight:700; font-size:15px;">
+                    Login to WeVote &rarr;
+                  </a>
+                </div>
+                <p style="color:#999; font-size:13px; margin-top:24px;">This is an automated message — please do not reply.</p>
+              </div>
+              <div style="background:#f8f9fa; padding:16px 24px; text-align:center; border-top:1px solid #e9ecef;">
+                <p style="color:#999; font-size:12px; margin:0;">WeVote | Forvis Mazars &bull; Secure Digital Voting Platform</p>
+              </div>
+            </div>
+          </body>
+        </html>`
+    };
+    await transporter.sendMail(mailOptions);
+    logger.info(`Voter promotion email sent to ${email}`);
+    return { success: true };
+  } catch (error) {
+    logger.error('Failed to send voter promotion email:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   sendAdminCredentialsEmail,
   sendUserApprovalEmail,
   sendSessionAssignmentEmail,
   sendPasswordResetEmail,
+  sendVoteConfirmationEmail,
+  sendVoterPromotionEmail,
+  sendNotGoodStandingEmail,
+  sendRegistrationAcknowledgmentEmail,
   verifyEmailConfig
 };

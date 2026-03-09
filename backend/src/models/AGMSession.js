@@ -30,8 +30,13 @@ class AGMSession {
       }
 
       if (filters.status) {
-        query += ' AND s.Status = @status';
-        params.status = filters.status;
+        // Treat 'in_progress' and 'active' as equivalent active states
+        if (filters.status === 'in_progress' || filters.status === 'active') {
+          query += " AND s.Status IN ('in_progress', 'active')";
+        } else {
+          query += ' AND s.Status = @status';
+          params.status = filters.status;
+        }
       }
 
       if (filters.sessionType) {
@@ -214,9 +219,20 @@ class AGMSession {
             UpdatedAt = GETDATE()
         OUTPUT INSERTED.*
         WHERE SessionID = @sessionId
+          AND Status IN ('scheduled', 'active')
       `;
 
       const result = await executeQuery(query, { sessionId });
+      if (!result.recordset[0]) {
+        // Session was not updated — check why
+        const current = await AGMSession.findById(sessionId);
+        if (!current) throw new Error('Session not found');
+        if (current.Status === 'in_progress') {
+          // Already running — return it (idempotent)
+          return current;
+        }
+        throw new Error(`Cannot start a session with status '${current.Status}'`);
+      }
       return result.recordset[0];
     } catch (error) {
       logger.error('Error in AGMSession.start:', error);
@@ -234,9 +250,20 @@ class AGMSession {
             UpdatedAt = GETDATE()
         OUTPUT INSERTED.*
         WHERE SessionID = @sessionId
+          AND Status IN ('in_progress', 'active')
       `;
 
       const result = await executeQuery(query, { sessionId });
+      if (!result.recordset[0]) {
+        // Session was not updated — check why
+        const current = await AGMSession.findById(sessionId);
+        if (!current) throw new Error('Session not found');
+        if (current.Status === 'completed') {
+          // Already ended — return it (idempotent)
+          return current;
+        }
+        throw new Error(`Cannot end a session with status '${current.Status}'. Start the session first.`);
+      }
       return result.recordset[0];
     } catch (error) {
       logger.error('Error in AGMSession.end:', error);

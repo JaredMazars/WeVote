@@ -10,6 +10,7 @@ const VoteAllocation = require('../models/VoteAllocation');
 const { validate } = require('../middleware/validator');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
+const { executeQuery } = require('../config/database');
 const logger = require('../config/logger');
 
 router.use(authenticateToken);
@@ -27,13 +28,37 @@ router.post('/', [
   body('notes').optional().isString(),
   validate
 ], asyncHandler(async (req, res) => {
+  const { userId, sessionId, maxCandidateVotes, maxResolutionVotes, allocatedVotes } = req.body;
+  const newAmount = allocatedVotes || maxCandidateVotes || maxResolutionVotes || 0;
+
+  // Guard: do not allow reducing allocation below votes already spent
+  const spentResult = await executeQuery(`
+    SELECT
+      ISNULL((SELECT SUM(cv.VotesAllocated) FROM CandidateVotes cv
+              WHERE cv.VoterUserID = @uid AND cv.SessionID = @sid AND cv.IsProxyVote = 0), 0) +
+      ISNULL((SELECT SUM(rv.VotesAllocated) FROM ResolutionVotes rv
+              WHERE rv.VoterUserID = @uid AND rv.SessionID = @sid AND rv.IsProxyVote = 0), 0)
+      AS TotalVotesSpent
+  `, { uid: parseInt(userId), sid: parseInt(sessionId) });
+
+  const totalSpent = spentResult.recordset[0]?.TotalVotesSpent || 0;
+
+  if (totalSpent > 0 && newAmount < totalSpent) {
+    throw new AppError(
+      `Cannot reduce vote allocation to ${newAmount}. This user has already cast ${totalSpent} vote(s) in this session. You can only increase the allocation.`,
+      400
+    );
+  }
+
   const allocation = await VoteAllocation.create(req.body);
   
-  logger.info(`Vote allocation set for user ${req.body.userId} in session ${req.body.sessionId} by admin ${req.user.userId}`);
+  logger.info(`Vote allocation set for user ${userId} in session ${sessionId} by admin ${req.user.userId} (totalSpent=${totalSpent}, newAmount=${newAmount})`);
   
   res.status(201).json({ 
+    success: true,
     message: 'Vote allocation set successfully', 
-    allocation 
+    allocation,
+    totalVotesSpent: totalSpent
   });
 }));
 

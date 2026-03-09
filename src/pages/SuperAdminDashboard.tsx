@@ -21,7 +21,9 @@ import {
   KeyRound,
   Copy,
   Check,
-  UserMinus
+  UserMinus,
+  Users,
+  X
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
@@ -105,8 +107,8 @@ const SuperAdminDashboard: React.FC = () => {
     enabled: false,
     min_proxy_voters: 1,
     max_proxy_voters: 10,
-    min_individual_votes: 1,
-    max_individual_votes: 5,
+    min_individual_votes: 2,
+    max_individual_votes: 4,
     updated_at: new Date().toISOString()
   });
   const [selectedSessionForVoting, setSelectedSessionForVoting] = useState<number | null>(null);
@@ -135,6 +137,11 @@ const SuperAdminDashboard: React.FC = () => {
   const [showCreateSessionModal, setShowCreateSessionModal] = useState(false);
   const [showEditSessionModal, setShowEditSessionModal] = useState(false);
   const [editingSession, setEditingSession] = useState<AGMSession | null>(null);
+  const [showVotersModal, setShowVotersModal] = useState(false);
+  const [selectedSessionForVoters, setSelectedSessionForVoters] = useState<AGMSession | null>(null);
+  const [sessionVoters, setSessionVoters] = useState<any[]>([]);
+  const [votersLoading, setVotersLoading] = useState(false);
+  const [sessionVoterCounts, setSessionVoterCounts] = useState<{ [sessionId: number]: number }>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [selectedSessionFilter, setSelectedSessionFilter] = useState<number | 'all'>('all');
@@ -252,6 +259,8 @@ const SuperAdminDashboard: React.FC = () => {
         for (const session of loadedSessions) {
           loadSessionAdmins(session.id);
         }
+        // Load voter counts for each session
+        loadVoterCountsForSessions(loadedSessions);
 
         // Load admin session assignments using the loaded sessions
         await loadAdminAssignmentsForSessions(loadedSessions);
@@ -259,6 +268,24 @@ const SuperAdminDashboard: React.FC = () => {
     } catch (error) {
       console.error('Error loading sessions:', error);
     }
+  };
+
+  const loadVoterCountsForSessions = async (loadedSessions: any[]) => {
+    const counts: { [sessionId: number]: number } = {};
+    await Promise.all(
+      loadedSessions.map(async (session) => {
+        try {
+          const res = await fetch(`http://localhost:3001/api/sessions/${session.id}/voters`, {
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            counts[session.id] = data.count || 0;
+          }
+        } catch { /* non-fatal */ }
+      })
+    );
+    setSessionVoterCounts(counts);
   };
 
   const loadSessionAdmins = async (sessionId: number) => {
@@ -419,8 +446,8 @@ const SuperAdminDashboard: React.FC = () => {
             enabled: data.settings.enabled || false,
             min_proxy_voters: data.settings.min_proxy_voters || 1,
             max_proxy_voters: data.settings.max_proxy_voters || 10,
-            min_individual_votes: data.settings.min_individual_votes || 1,
-            max_individual_votes: data.settings.max_individual_votes || 5,
+            min_individual_votes: data.settings.min_individual_votes || 2,
+            max_individual_votes: data.settings.max_individual_votes || 4,
             updated_at: data.settings.updated_at || new Date().toISOString()
           });
         }
@@ -430,7 +457,48 @@ const SuperAdminDashboard: React.FC = () => {
     }
   };
 
+  // ===== VOTER MANAGEMENT =====
+  const handleViewVoters = async (session: AGMSession) => {
+    setSelectedSessionForVoters(session);
+    setShowVotersModal(true);
+    setVotersLoading(true);
+    try {
+      const res = await fetch(`http://localhost:3001/api/sessions/${session.id}/voters`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessionVoters(data.voters || []);
+      }
+    } catch (err) {
+      console.error('Failed to load session voters:', err);
+    } finally {
+      setVotersLoading(false);
+    }
+  };
 
+  const handleRemoveVoterFromSession = async (sessionId: number, userId: number) => {
+    if (!confirm('Remove this voter from the session? Their vote allocation will be deleted.')) return;
+    try {
+      const res = await fetch(`http://localhost:3001/api/sessions/${sessionId}/voters/${userId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        setSessionVoters(prev => prev.filter((v: any) => v.UserID !== userId));
+        setSessionVoterCounts(prev => ({ ...prev, [sessionId]: Math.max(0, (prev[sessionId] || 1) - 1) }));
+        setSuccessMessage('Voter removed from session.');
+        setTimeout(() => setSuccessMessage(null), 2000);
+      } else {
+        const errData = await res.json();
+        setError(errData.message || 'Failed to remove voter');
+        setTimeout(() => setError(null), 4000);
+      }
+    } catch (err) {
+      setError('Failed to remove voter from session');
+      setTimeout(() => setError(null), 4000);
+    }
+  };
 
   // ===== SESSION HANDLERS =====
   const handleCreateSession = async () => {
@@ -1347,7 +1415,9 @@ const SuperAdminDashboard: React.FC = () => {
                             </div>
                             <div className="bg-gray-50 p-3 rounded-xl">
                               <p className="text-xs text-gray-500 font-medium">Voters</p>
-                              <p className="text-sm font-bold text-gray-900 mt-1">{session.totalVoters}</p>
+                              <p className="text-sm font-bold text-gray-900 mt-1">
+                                {sessionVoterCounts[session.id] ?? session.totalVoters}
+                              </p>
                             </div>
                             <div className="bg-gray-50 p-3 rounded-xl">
                               <p className="text-xs text-gray-500 font-medium">Admins</p>
@@ -1393,6 +1463,13 @@ const SuperAdminDashboard: React.FC = () => {
                         >
                           <RotateCcw className="w-4 h-4" />
                           Reset
+                        </button>
+                        <button
+                          onClick={() => handleViewVoters(session)}
+                          className="flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-xl hover:bg-indigo-200 transition-all font-medium"
+                        >
+                          <Users className="w-4 h-4" />
+                          Voters ({sessionVoterCounts[session.id] ?? '…'})
                         </button>
                         <button
                           onClick={() => handleEditSession(session)}
@@ -1680,8 +1757,8 @@ const SuperAdminDashboard: React.FC = () => {
             {activeTab === 'vote-splitting' && (
               <div className="bg-white rounded-3xl p-8 shadow-2xl border-2 border-gray-100">
                 <div className="mb-6">
-                  <h2 className="text-3xl font-bold text-[#464B4B] mb-2">Vote Splitting Configuration</h2>
-                  <p className="text-[#464B4B]/70">Control proxy voting and vote distribution settings</p>
+                  <h2 className="text-3xl font-bold text-[#464B4B] mb-2">Vote Limits Configuration</h2>
+                  <p className="text-[#464B4B]/70">Set the minimum and maximum votes each voter can be assigned. New voters are automatically given the minimum on approval. Admins can then adjust up to the maximum.</p>
                 </div>
 
                 {/* AGM Session Selector */}
@@ -1790,34 +1867,36 @@ const SuperAdminDashboard: React.FC = () => {
                     </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                  <div className="bg-gray-50 rounded-2xl p-6">
-                    <label className="block text-sm font-bold text-[#464B4B] mb-3 uppercase tracking-wide">
-                      Minimum Votes
+                  <div className="bg-green-50 rounded-2xl p-6 border-2 border-green-200">
+                    <label className="block text-sm font-bold text-[#464B4B] mb-1 uppercase tracking-wide">
+                      Minimum Votes Per User
                     </label>
+                    <p className="text-xs text-gray-500 mb-3">Auto-assigned when a user is approved. Default: 2</p>
                     <input
                       type="number"
-                      value={voteSplittingSettings.min_proxy_voters}
+                      value={voteSplittingSettings.min_individual_votes}
                       onChange={(e) => setVoteSplittingSettings(prev => ({
                         ...prev,
-                        min_proxy_voters: parseInt(e.target.value) || 1
+                        min_individual_votes: parseInt(e.target.value) || 1
                       }))}
-                      className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-500 focus:border-[#0072CE] text-lg font-bold"
+                      className="w-full px-4 py-4 border-2 border-green-300 rounded-xl focus:ring-4 focus:ring-green-500 focus:border-green-600 text-lg font-bold"
                       min="1"
                     />
                   </div>
 
-                  <div className="bg-gray-50 rounded-2xl p-6">
-                    <label className="block text-sm font-bold text-[#464B4B] mb-3 uppercase tracking-wide">
-                      Maximum Votes
+                  <div className="bg-blue-50 rounded-2xl p-6 border-2 border-blue-200">
+                    <label className="block text-sm font-bold text-[#464B4B] mb-1 uppercase tracking-wide">
+                      Maximum Votes Per User
                     </label>
+                    <p className="text-xs text-gray-500 mb-3">Admin can assign up to this number per voter. Default: 4</p>
                     <input
                       type="number"
-                      value={voteSplittingSettings.max_proxy_voters}
+                      value={voteSplittingSettings.max_individual_votes}
                       onChange={(e) => setVoteSplittingSettings(prev => ({
                         ...prev,
-                        max_proxy_voters: parseInt(e.target.value) || 10
+                        max_individual_votes: parseInt(e.target.value) || 1
                       }))}
-                      className="w-full px-4 py-4 border-2 border-gray-300 rounded-xl focus:ring-4 focus:ring-blue-500 focus:border-[#0072CE] text-lg font-bold"
+                      className="w-full px-4 py-4 border-2 border-blue-300 rounded-xl focus:ring-4 focus:ring-blue-500 focus:border-[#0072CE] text-lg font-bold"
                       min="1"
                     />
                   </div>
@@ -2482,6 +2561,113 @@ const SuperAdminDashboard: React.FC = () => {
               >
                 Set New Password
               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== VOTER MANAGEMENT MODAL ===== */}
+      <AnimatePresence>
+        {showVotersModal && selectedSessionForVoters && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50"
+            onClick={() => setShowVotersModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white rounded-3xl p-8 max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-[#171C8F]">Enrolled Voters</h2>
+                  <p className="text-[#464B4B]/70 text-sm mt-1">{selectedSessionForVoters.title}</p>
+                </div>
+                <button onClick={() => setShowVotersModal(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="h-7 w-7" />
+                </button>
+              </div>
+
+              {/* Stats */}
+              <div className="flex gap-4 mb-6">
+                <div className="flex-1 bg-indigo-50 rounded-2xl p-4 text-center">
+                  <p className="text-3xl font-bold text-indigo-700">{sessionVoters.length}</p>
+                  <p className="text-sm text-indigo-600 mt-1">Total Enrolled</p>
+                </div>
+                <div className="flex-1 bg-green-50 rounded-2xl p-4 text-center">
+                  <p className="text-3xl font-bold text-green-700">{sessionVoters.filter((v: any) => v.IsActive).length}</p>
+                  <p className="text-sm text-green-600 mt-1">Active Accounts</p>
+                </div>
+                <div className="flex-1 bg-emerald-50 rounded-2xl p-4 text-center">
+                  <p className="text-3xl font-bold text-emerald-700">{sessionVoters.filter((v: any) => v.IsGoodStanding).length}</p>
+                  <p className="text-sm text-emerald-600 mt-1">Good Standing</p>
+                </div>
+              </div>
+
+              {/* Voter List */}
+              <div className="flex-1 overflow-y-auto">
+                {votersLoading ? (
+                  <div className="flex items-center justify-center py-16">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#0072CE]" />
+                  </div>
+                ) : sessionVoters.length === 0 ? (
+                  <div className="text-center py-16">
+                    <Users className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-[#464B4B]/60 text-lg">No voters enrolled in this session yet.</p>
+                    <p className="text-sm text-[#464B4B]/40 mt-2">Assign voters via the Admin Approvals page.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {sessionVoters.map((voter: any) => (
+                      <div
+                        key={voter.UserID}
+                        className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 border border-gray-100 hover:border-gray-200 transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 bg-gradient-to-r from-[#0072CE] to-[#171C8F] rounded-full flex items-center justify-center">
+                            <span className="text-white font-bold text-sm">
+                              {voter.FirstName?.charAt(0)}{voter.LastName?.charAt(0)}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="font-semibold text-[#464B4B]">{voter.FirstName} {voter.LastName}</p>
+                            <p className="text-xs text-[#464B4B]/60">{voter.Email}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <p className="text-xs text-gray-500">{voter.AllocatedVotes} vote{voter.AllocatedVotes !== 1 ? 's' : ''}</p>
+                            <div className="flex gap-1 mt-1 justify-end">
+                              {voter.IsActive ? (
+                                <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-medium">Active</span>
+                              ) : (
+                                <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full font-medium">Inactive</span>
+                              )}
+                              {voter.IsGoodStanding ? (
+                                <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-medium">Good Standing</span>
+                              ) : (
+                                <span className="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">Pending</span>
+                              )}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleRemoveVoterFromSession(selectedSessionForVoters.id, voter.UserID)}
+                            className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                            title="Remove from session"
+                          >
+                            <UserMinus className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </motion.div>
           </motion.div>
         )}

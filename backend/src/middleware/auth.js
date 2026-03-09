@@ -8,7 +8,7 @@ const logger = require('../config/logger');
 // Verify JWT token
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+  const token = (authHeader && authHeader.split(' ')[1]) || req.query.token; // Bearer TOKEN or ?token= for SSE
 
   if (!token) {
     return res.status(401).json({ 

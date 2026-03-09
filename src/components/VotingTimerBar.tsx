@@ -19,25 +19,29 @@ const VotingTimerBar: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [loading, setLoading] = useState(true);
 
+  // Helper to parse sessions from API response (data is already an array after transformation)
+  const parseSessions = (data: any): any[] =>
+    Array.isArray(data) ? data : (data?.sessions || []);
+
   // Fetch active AGM session from backend
   const fetchActiveSession = async () => {
     try {
-      const response = await api.get('/sessions?status=in_progress');
-      const sessions = (response.data as any)?.sessions || [];
+      const response = await api.getActiveSession();
+      const sessions = parseSessions(response.data);
       
       if (sessions.length > 0) {
         setAgmSession(sessions[0]); // Get first active session
       } else {
         // Check for scheduled sessions
         const scheduledResponse = await api.get('/sessions?status=scheduled');
-        const scheduledSessions = (scheduledResponse.data as any)?.sessions || [];
+        const scheduledSessions = parseSessions(scheduledResponse.data);
         
         if (scheduledSessions.length > 0) {
           setAgmSession(scheduledSessions[0]);
         } else {
           // Check for completed sessions
           const completedResponse = await api.get('/sessions?status=completed');
-          const completedSessions = (completedResponse.data as any)?.sessions || [];
+          const completedSessions = parseSessions(completedResponse.data);
           if (completedSessions.length > 0) {
             // Show completed status for last 5 minutes
             const lastSession = completedSessions[0];
@@ -109,7 +113,8 @@ const VotingTimerBar: React.FC = () => {
       };
     }
 
-    // Check if AGM is currently active
+    // Check if AGM is currently active — use Status, not scheduled time
+    // (admin ends the session manually, so scheduled end time may already be past)
     if (agmSession.Status === 'in_progress') {
       const remainingMs = endDateTime.getTime() - now.getTime();
       
@@ -117,10 +122,10 @@ const VotingTimerBar: React.FC = () => {
         const hours = Math.floor(remainingMs / (1000 * 60 * 60));
         const minutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
         const seconds = Math.floor((remainingMs % (1000 * 60)) / 1000);
-        
         return { status: 'active', hours, minutes, seconds, title: agmSession.Title };
       } else {
-        return { status: 'expired', title: agmSession.Title };
+        // Scheduled time is past but session is still in_progress — show active without countdown
+        return { status: 'active', hours: 0, minutes: 0, seconds: 0, title: agmSession.Title };
       }
     }
 
@@ -180,19 +185,27 @@ const VotingTimerBar: React.FC = () => {
 
   // Active state with countdown
   if (timerStatus.status === 'active') {
+    const hasTime = (timerStatus.hours || 0) > 0 || (timerStatus.minutes || 0) > 0 || (timerStatus.seconds || 0) > 0;
     return (
       <div className="w-full bg-green-600 text-white py-3 shadow-lg">
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-center gap-4">
           <Clock className="h-5 w-5 flex-shrink-0 animate-pulse" />
           <div className="flex items-center gap-2">
             <span className="font-bold text-lg">{timerStatus.title} - VOTING ACTIVE</span>
-            <span className="text-white/80">•</span>
-            <span className="font-mono text-xl font-bold">
-              {(timerStatus.hours && timerStatus.hours > 0) ? `${timerStatus.hours}:` : ''}
-              {String(timerStatus.minutes || 0).padStart(2, '0')}:
-              {String(timerStatus.seconds || 0).padStart(2, '0')}
-            </span>
-            <span className="text-white/90 font-medium">remaining</span>
+            {hasTime && (
+              <>
+                <span className="text-white/80">•</span>
+                <span className="font-mono text-xl font-bold">
+                  {(timerStatus.hours && timerStatus.hours > 0) ? `${timerStatus.hours}:` : ''}
+                  {String(timerStatus.minutes || 0).padStart(2, '0')}:
+                  {String(timerStatus.seconds || 0).padStart(2, '0')}
+                </span>
+                <span className="text-white/90 font-medium">remaining</span>
+              </>
+            )}
+            {!hasTime && (
+              <span className="text-white/90 font-medium">• IN PROGRESS</span>
+            )}
           </div>
         </div>
       </div>

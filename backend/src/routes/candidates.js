@@ -8,6 +8,7 @@ const router = express.Router();
 const { body, param, query } = require('express-validator');
 const Candidate = require('../models/Candidate');
 const Employee = require('../models/Employee');
+const AGMSession = require('../models/AGMSession');
 const { validate } = require('../middleware/validator');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
@@ -104,6 +105,12 @@ router.post('/', [
   body('nominationReason').optional().isString(),
   validate
 ], asyncHandler(async (req, res) => {
+  // Session lock guard — cannot modify candidates while session is live
+  const lockSession = await AGMSession.findById(req.body.sessionId);
+  if (lockSession && lockSession.Status === 'in_progress') {
+    throw new AppError('Cannot add candidates while the session is in progress', 423);
+  }
+
   // Create the candidate linked to an existing employee
   const candidateData = {
     sessionId: req.body.sessionId,
@@ -144,6 +151,15 @@ router.put('/:id', [
 ], asyncHandler(async (req, res) => {
   const candidateId = parseInt(req.params.id);
 
+  // Session lock guard
+  const existingCandidate = await Candidate.findById(candidateId);
+  if (existingCandidate) {
+    const lockSession = await AGMSession.findById(existingCandidate.SessionID);
+    if (lockSession && lockSession.Status === 'in_progress') {
+      throw new AppError('Cannot update candidates while the session is in progress', 423);
+    }
+  }
+
   const candidate = await Candidate.update(candidateId, req.body);
 
   if (!candidate) {
@@ -167,6 +183,15 @@ router.delete('/:id', [
   validate
 ], asyncHandler(async (req, res) => {
   const candidateId = parseInt(req.params.id);
+
+  // Session lock guard
+  const existingCandidate = await Candidate.findById(candidateId);
+  if (existingCandidate) {
+    const lockSession = await AGMSession.findById(existingCandidate.SessionID);
+    if (lockSession && lockSession.Status === 'in_progress') {
+      throw new AppError('Cannot delete candidates while the session is in progress', 423);
+    }
+  }
 
   const result = await Candidate.delete(candidateId);
 

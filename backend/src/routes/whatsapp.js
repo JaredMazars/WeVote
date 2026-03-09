@@ -5,6 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const { body, param } = require('express-validator');
 const { validate } = require('../middleware/validator');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
@@ -14,10 +15,24 @@ const logger = require('../config/logger');
 router.use(authenticateToken);
 router.use(authorizeRoles('super_admin', 'admin'));
 
-// TODO: Configure WhatsApp Business API credentials
-// const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL;
-// const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
-// const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const WHATSAPP_API_URL = process.env.WHATSAPP_API_URL;
+const WHATSAPP_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const WHATSAPP_PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
+const WA_ENABLED = !!(WHATSAPP_API_URL && WHATSAPP_ACCESS_TOKEN && WHATSAPP_PHONE_NUMBER_ID);
+
+// Shared helper — uses real API when env vars are set, falls back to mock
+const sendWhatsAppMessage = async (phoneNumber, text) => {
+  if (!WA_ENABLED) {
+    logger.warn(`WhatsApp not configured — mock send to ${phoneNumber}`);
+    return { phoneNumber, status: 'queued', messageId: `mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` };
+  }
+  const response = await axios.post(
+    `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    { messaging_product: 'whatsapp', to: phoneNumber, type: 'text', text: { body: text } },
+    { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' } }
+  );
+  return { phoneNumber, status: 'sent', messageId: response.data.messages[0].id };
+};
 
 // @route   POST /api/whatsapp/send-voting-link
 // @desc    Send voting link to users via WhatsApp
@@ -33,71 +48,23 @@ router.post('/send-voting-link', [
 ], asyncHandler(async (req, res) => {
   const { recipients, sessionId, votingUrl, message } = req.body;
 
-  // TODO: Implement actual WhatsApp API integration
-  // Example using WhatsApp Business API:
-  /*
-  const axios = require('axios');
-  
-  const results = await Promise.all(recipients.map(async (recipient) => {
-    const customMessage = message || `Hello ${recipient.name || 'there'}! 
-    
-You have been invited to vote in the AGM session. Click the link below to access the voting platform:
-
-${votingUrl}
-
-Session ID: ${sessionId}
-
-Please complete your vote before the session closes.
-
-Thank you for participating!`;
-
-    try {
-      const response = await axios.post(
-        `${WHATSAPP_API_URL}/${WHATSAPP_PHONE_NUMBER_ID}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to: recipient.phoneNumber,
-          type: 'text',
-          text: { body: customMessage }
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
-
-      return {
-        phoneNumber: recipient.phoneNumber,
-        status: 'sent',
-        messageId: response.data.messages[0].id
-      };
-    } catch (error) {
-      return {
-        phoneNumber: recipient.phoneNumber,
-        status: 'failed',
-        error: error.message
-      };
-    }
-  }));
-  */
-
-  // Placeholder implementation
   logger.info(`WhatsApp voting link requested for ${recipients.length} recipients in session ${sessionId} by user ${req.user.userId}`);
 
-  const results = recipients.map(recipient => ({
-    phoneNumber: recipient.phoneNumber,
-    status: 'queued',
-    messageId: `mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  const results = await Promise.all(recipients.map(async (recipient) => {
+    const text = message || `Hello ${recipient.name || 'there'}!\n\nYou have been invited to vote in the AGM session.\n\nVoting link: ${votingUrl}\nSession ID: ${sessionId}\n\nPlease complete your vote before the session closes.\n\nThank you for participating!`;
+    try {
+      return await sendWhatsAppMessage(recipient.phoneNumber, text);
+    } catch (err) {
+      logger.error(`WhatsApp send failed for ${recipient.phoneNumber}:`, err.message);
+      return { phoneNumber: recipient.phoneNumber, status: 'failed', error: err.message };
+    }
   }));
 
   res.json({
-    message: 'Voting link notifications queued successfully',
+    message: `Voting link notifications sent to ${results.filter(r => r.status === 'sent').length}/${recipients.length} recipients`,
     sessionId,
     recipientCount: recipients.length,
-    results,
-    note: 'WhatsApp API integration pending - messages are currently queued but not sent'
+    results
   });
 }));
 
@@ -115,21 +82,23 @@ router.post('/send-session-start', [
 ], asyncHandler(async (req, res) => {
   const { recipients, sessionId, sessionName, startTime, votingUrl } = req.body;
 
-  // TODO: Implement actual WhatsApp API integration
   logger.info(`WhatsApp session start notification for session ${sessionId} to ${recipients.length} recipients by user ${req.user.userId}`);
 
-  const results = recipients.map(recipient => ({
-    phoneNumber: recipient.phoneNumber,
-    status: 'queued',
-    messageId: `mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  const results = await Promise.all(recipients.map(async (recipient) => {
+    const text = `The AGM voting session "${sessionName}" has started!\n\nStart time: ${new Date(startTime).toLocaleString()}\nVoting link: ${votingUrl}\nSession ID: ${sessionId}\n\nPlease cast your votes now.`;
+    try {
+      return await sendWhatsAppMessage(recipient.phoneNumber, text);
+    } catch (err) {
+      logger.error(`WhatsApp send failed for ${recipient.phoneNumber}:`, err.message);
+      return { phoneNumber: recipient.phoneNumber, status: 'failed', error: err.message };
+    }
   }));
 
   res.json({
-    message: 'Session start notifications queued successfully',
+    message: `Session start notifications sent to ${results.filter(r => r.status === 'sent').length}/${recipients.length} recipients`,
     sessionId,
     recipientCount: recipients.length,
-    results,
-    note: 'WhatsApp API integration pending - messages are currently queued but not sent'
+    results
   });
 }));
 
@@ -146,21 +115,23 @@ router.post('/send-reminder', [
 ], asyncHandler(async (req, res) => {
   const { recipients, sessionId, reminderMessage, votingUrl } = req.body;
 
-  // TODO: Implement actual WhatsApp API integration
   logger.info(`WhatsApp reminder for session ${sessionId} to ${recipients.length} recipients by user ${req.user.userId}`);
 
-  const results = recipients.map(recipient => ({
-    phoneNumber: recipient.phoneNumber,
-    status: 'queued',
-    messageId: `mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  const results = await Promise.all(recipients.map(async (recipient) => {
+    const text = `${reminderMessage}${votingUrl ? `\n\nVoting link: ${votingUrl}` : ''}`;
+    try {
+      return await sendWhatsAppMessage(recipient.phoneNumber, text);
+    } catch (err) {
+      logger.error(`WhatsApp send failed for ${recipient.phoneNumber}:`, err.message);
+      return { phoneNumber: recipient.phoneNumber, status: 'failed', error: err.message };
+    }
   }));
 
   res.json({
-    message: 'Reminder notifications queued successfully',
+    message: `Reminder notifications sent to ${results.filter(r => r.status === 'sent').length}/${recipients.length} recipients`,
     sessionId,
     recipientCount: recipients.length,
-    results,
-    note: 'WhatsApp API integration pending - messages are currently queued but not sent'
+    results
   });
 }));
 
@@ -173,20 +144,14 @@ router.get('/delivery-status/:messageId', [
 ], asyncHandler(async (req, res) => {
   const { messageId } = req.params;
 
-  // TODO: Implement actual WhatsApp API integration
-  /*
-  const axios = require('axios');
-  
+  if (!WA_ENABLED) {
+    return res.json({ messageId, status: 'unknown', note: 'WhatsApp API not configured', timestamp: new Date().toISOString() });
+  }
   try {
     const response = await axios.get(
       `${WHATSAPP_API_URL}/${messageId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${WHATSAPP_ACCESS_TOKEN}`
-        }
-      }
+      { headers: { Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}` } }
     );
-
     res.json({
       messageId,
       status: response.data.status,
@@ -196,15 +161,6 @@ router.get('/delivery-status/:messageId', [
   } catch (error) {
     throw new AppError(`Failed to get delivery status: ${error.message}`, 500);
   }
-  */
-
-  // Placeholder implementation
-  res.json({
-    messageId,
-    status: 'queued',
-    note: 'WhatsApp API integration pending - delivery status not available',
-    timestamp: new Date().toISOString()
-  });
 }));
 
 // @route   POST /api/whatsapp/send-bulk
@@ -219,21 +175,22 @@ router.post('/send-bulk', [
 ], asyncHandler(async (req, res) => {
   const { recipients, sessionId } = req.body;
 
-  // TODO: Implement actual WhatsApp API integration with rate limiting
-  logger.info(`Bulk WhatsApp send requested for ${recipients.length} recipients by user ${req.user.userId}`);
+  logger.info(`Bulk WhatsApp send for ${recipients.length} recipients by user ${req.user.userId}`);
 
-  const results = recipients.map(recipient => ({
-    phoneNumber: recipient.phoneNumber,
-    status: 'queued',
-    messageId: `mock-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  const results = await Promise.all(recipients.map(async (recipient) => {
+    try {
+      return await sendWhatsAppMessage(recipient.phoneNumber, recipient.message);
+    } catch (err) {
+      logger.error(`WhatsApp bulk send failed for ${recipient.phoneNumber}:`, err.message);
+      return { phoneNumber: recipient.phoneNumber, status: 'failed', error: err.message };
+    }
   }));
 
   res.json({
-    message: 'Bulk messages queued successfully',
+    message: `Bulk send complete: ${results.filter(r => r.status === 'sent').length}/${recipients.length} sent`,
     sessionId,
     recipientCount: recipients.length,
-    results,
-    note: 'WhatsApp API integration pending - messages are currently queued but not sent'
+    results
   });
 }));
 

@@ -11,6 +11,19 @@ const { authorizeRoles } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const logger = require('../config/logger');
 
+// @route   GET /api/vote-splitting/limits
+// @desc    Get the min/max vote limits for the authenticated user's organization
+// @access  Private (any authenticated user — voters need this too)
+router.get('/limits', asyncHandler(async (req, res) => {
+  const organizationId = req.user.organizationId;
+  const settings = await VoteSplittingSettings.getByOrganization(organizationId);
+
+  const minVotes = settings?.MinIndividualVotes ?? 2;
+  const maxVotes = settings?.MaxIndividualVotes ?? 4;
+
+  res.json({ minVotes, maxVotes });
+}));
+
 // @route   GET /api/vote-splitting
 // @desc    Get vote splitting settings for organization
 // @access  Private (Admin, Super Admin)
@@ -28,8 +41,8 @@ router.get('/', [
         enabled: false,
         min_proxy_voters: 1,
         max_proxy_voters: 10,
-        min_individual_votes: 1,
-        max_individual_votes: 5
+        min_individual_votes: 2,
+        max_individual_votes: 4
       }
     });
   }

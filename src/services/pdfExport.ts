@@ -343,6 +343,156 @@ class PDFService {
     link.click();
     URL.revokeObjectURL(url);
   }
+
+  /**
+   * Generate a printable AGM results PDF report.
+   * Opens a new browser window pre-styled for print / Save as PDF.
+   */
+  generateAGMReport(data: {
+    sessionTitle: string;
+    generatedAt?: Date;
+    candidates: Array<{ name: string; position: string; votes: number; percentage: number }>;
+    resolutions: Array<{ number: string; title: string; yes: number; no: number; abstain: number; totalVotes: number; passed: boolean }>;
+    attendance?: { total: number; present: number; quorumPct: number };
+  }): void {
+    const now = (data.generatedAt ?? new Date()).toLocaleString();
+    const totalCandidateVotes = data.candidates.reduce((s, c) => s + c.votes, 0);
+
+    const candidateRows = data.candidates.map(c => `
+      <tr>
+        <td>${c.name}</td>
+        <td>${c.position}</td>
+        <td style="text-align:center">${c.votes.toLocaleString()}</td>
+        <td style="text-align:center">${c.percentage.toFixed(1)}%</td>
+        <td>
+          <div style="background:#e5e7eb;border-radius:4px;height:12px;width:100%">
+            <div style="background:#0072CE;border-radius:4px;height:12px;width:${c.percentage}%"></div>
+          </div>
+        </td>
+      </tr>`).join('');
+
+    const resolutionRows = data.resolutions.map(r => {
+      const yesPct = r.totalVotes > 0 ? ((r.yes / r.totalVotes) * 100).toFixed(1) : '0.0';
+      return `
+      <tr>
+        <td>${r.number}</td>
+        <td>${r.title}</td>
+        <td style="text-align:center;color:#16a34a">${r.yes.toLocaleString()}</td>
+        <td style="text-align:center;color:#dc2626">${r.no.toLocaleString()}</td>
+        <td style="text-align:center;color:#6b7280">${r.abstain.toLocaleString()}</td>
+        <td style="text-align:center">${yesPct}%</td>
+        <td style="text-align:center">
+          <span style="padding:2px 10px;border-radius:9999px;font-weight:700;font-size:12px;
+            background:${r.passed ? '#dcfce7' : '#fee2e2'};
+            color:${r.passed ? '#15803d' : '#b91c1c'}">
+            ${r.passed ? 'PASSED' : 'FAILED'}
+          </span>
+        </td>
+      </tr>`;
+    }).join('');
+
+    const attendanceSection = data.attendance ? `
+      <div class="section">
+        <h2>Attendance & Quorum</h2>
+        <table>
+          <tr><th>Total Registered</th><th>Present</th><th>Quorum %</th><th>Quorum Met</th></tr>
+          <tr>
+            <td style="text-align:center">${data.attendance.total}</td>
+            <td style="text-align:center">${data.attendance.present}</td>
+            <td style="text-align:center">${data.attendance.quorumPct.toFixed(1)}%</td>
+            <td style="text-align:center">
+              <span style="padding:2px 10px;border-radius:9999px;font-weight:700;font-size:12px;
+                background:${data.attendance.quorumPct >= 50 ? '#dcfce7' : '#fee2e2'};
+                color:${data.attendance.quorumPct >= 50 ? '#15803d' : '#b91c1c'}">
+                ${data.attendance.quorumPct >= 50 ? 'YES' : 'NO'}
+              </span>
+            </td>
+          </tr>
+        </table>
+      </div>` : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>AGM Results Report – ${data.sessionTitle}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;color:#1f2937;background:#fff;padding:32px}
+    .header{display:flex;align-items:center;gap:20px;border-bottom:3px solid #0072CE;padding-bottom:20px;margin-bottom:28px}
+    .logo-block{background:linear-gradient(135deg,#0072CE,#171C8F);border-radius:12px;padding:12px 20px;color:#fff;font-weight:800;font-size:22px;letter-spacing:.5px}
+    h1{font-size:24px;color:#171C8F;flex:1}
+    .meta{font-size:12px;color:#6b7280;margin-top:4px}
+    .section{margin-bottom:32px}
+    h2{font-size:16px;font-weight:700;color:#171C8F;border-left:4px solid #0072CE;padding-left:10px;margin-bottom:14px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th{background:#f1f5f9;padding:10px 12px;text-align:left;font-weight:700;color:#374151;border-bottom:2px solid #e2e8f0}
+    td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+    tr:hover td{background:#f8fafc}
+    .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
+    .card{background:linear-gradient(135deg,#f0f9ff,#e0f2fe);border-radius:12px;padding:16px;text-align:center}
+    .card .num{font-size:28px;font-weight:800;color:#0072CE}
+    .card .lbl{font-size:12px;color:#475569;margin-top:4px}
+    .footer{margin-top:40px;padding-top:16px;border-top:1px solid #e2e8f0;font-size:11px;color:#9ca3af;text-align:center}
+    @media print{
+      button{display:none!important}
+      body{padding:16px}
+      .no-print{display:none}
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="logo-block">FM</div>
+    <div>
+      <h1>${data.sessionTitle}</h1>
+      <div class="meta">Annual General Meeting – Official Results Report &nbsp;|&nbsp; Generated: ${now}</div>
+    </div>
+  </div>
+
+  <div class="no-print" style="margin-bottom:20px">
+    <button onclick="window.print()" style="padding:10px 24px;background:linear-gradient(135deg,#0072CE,#171C8F);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-right:10px">🖨️ Print / Save as PDF</button>
+    <button onclick="window.close()" style="padding:10px 24px;background:#f1f5f9;color:#374151;border:none;border-radius:8px;font-size:14px;cursor:pointer">✕ Close</button>
+  </div>
+
+  <div class="summary">
+    <div class="card"><div class="num">${data.candidates.length}</div><div class="lbl">Candidates Voted</div></div>
+    <div class="card"><div class="num">${data.resolutions.length}</div><div class="lbl">Resolutions</div></div>
+    <div class="card"><div class="num">${totalCandidateVotes.toLocaleString()}</div><div class="lbl">Total Votes Cast</div></div>
+  </div>
+
+  ${attendanceSection}
+
+  <div class="section">
+    <h2>Candidate Voting Results</h2>
+    <table>
+      <thead><tr><th>Candidate</th><th>Position</th><th>Votes</th><th>%</th><th style="min-width:120px">Bar</th></tr></thead>
+      <tbody>${candidateRows || '<tr><td colspan="5" style="text-align:center;color:#9ca3af">No candidate data</td></tr>'}</tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>Resolution Voting Results</h2>
+    <table>
+      <thead><tr><th>No.</th><th>Resolution</th><th>Yes</th><th>No</th><th>Abstain</th><th>Yes %</th><th>Result</th></tr></thead>
+      <tbody>${resolutionRows || '<tr><td colspan="7" style="text-align:center;color:#9ca3af">No resolution data</td></tr>'}</tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    WeVote – Forvis Mazars Voting Platform &nbsp;|&nbsp; This document constitutes the official record of the AGM voting results. &nbsp;|&nbsp; ${now}
+  </div>
+</body>
+</html>`;
+
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+    } else {
+      alert('Please allow pop-ups to generate the PDF report.');
+    }
+  }
 }
 
 export const pdfService = new PDFService();

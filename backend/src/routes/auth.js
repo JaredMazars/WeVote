@@ -206,13 +206,18 @@ router.post('/register-pending', [
     firstName,
     lastName,
     phoneNumber,
-    role: 'voter' // All registrations default to voter
+    role: 'user' // Pending registrations start as 'user' — admin must approve to promote to 'voter'
   });
 
   // TODO: Store additional registration data (address, etc.) in a separate table if needed
   // For now, we'll just create the user and admin can see them in pending approvals
 
   logger.info(`New pending user registered: ${newUser.Email} - awaiting admin approval`);
+
+  // Send registration acknowledgment email (fire-and-forget — don't block the response)
+  const { sendRegistrationAcknowledgmentEmail } = require('../services/emailService');
+  sendRegistrationAcknowledgmentEmail({ email: newUser.Email, firstName: newUser.FirstName })
+    .catch(err => logger.warn(`Registration acknowledgment email failed for ${newUser.Email} (non-fatal):`, err.message));
 
   res.status(201).json({
     success: true,
@@ -474,8 +479,7 @@ router.post('/forgot-password', [
   }
 
   res.json({
-    message: 'If the email exists, a password reset link has been sent.',
-    tempPassword: tempPassword // In production, remove this - only send via email
+    message: 'If the email exists, a password reset link has been sent.'
   });
 }));
 

@@ -121,12 +121,12 @@ class User {
       const query = `
         INSERT INTO Users (
           OrganizationID, Email, PasswordHash, Salt, FirstName, LastName,
-          Role, PhoneNumber, IsActive, IsEmailVerified, RequiresPasswordChange
+          Role, PhoneNumber, IsActive, IsEmailVerified, RequiresPasswordChange, IsGoodStanding
         )
         OUTPUT INSERTED.*
         VALUES (
           @organizationId, @email, @passwordHash, @salt, @firstName, @lastName,
-          @role, @phoneNumber, 0, 0, 1
+          @role, @phoneNumber, 0, 0, 1, 0
         )
       `;
 
@@ -327,18 +327,8 @@ class User {
       `;
       await executeQuery(deleteSessionAdmins, { userId });
 
-      // Get current user info to check if they have an employee record
-      const checkEmployee = `
-        SELECT e.EmployeeID 
-        FROM Employees e 
-        WHERE e.UserID = @userId
-      `;
-      const employeeResult = await executeQuery(checkEmployee, { userId });
-      const hasEmployee = employeeResult.recordset.length > 0;
-
-      // Demote to 'user' role (or 'employee' if they have an employee record)
-      // Keep email intact, keep account active
-      const newRole = hasEmployee ? 'employee' : 'user';
+      // Demote to 'user' role — keep email intact, keep account active
+      const newRole = 'user';
       const query = `
         UPDATE Users
         SET Role = @newRole

@@ -27,7 +27,7 @@ const corsOptions = {
   origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:5173',
   credentials: true,
   optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 app.use(cors(corsOptions));
@@ -61,8 +61,10 @@ const limiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
-    // Skip rate limiting for health check
-    return req.path === '/health';
+    // Skip rate limiting for health check and localhost (development)
+    const ip = req.ip || req.connection.remoteAddress || '';
+    const isLocalhost = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+    return req.path === '/health' || isLocalhost;
   }
 });
 
@@ -105,6 +107,7 @@ app.use('/api/blockchain', authenticateToken, require('./routes/blockchain'));
 app.use('/api/audit-logs', authenticateToken, require('./routes/audit'));
 app.use('/api/vote-splitting', authenticateToken, require('./routes/voteSplitting'));
 app.use('/api/notifications', authenticateToken, require('./routes/notifications'));
+app.use('/api/chat', authenticateToken, require('./routes/chat'));
 
 // 404 handler
 app.use(notFound);

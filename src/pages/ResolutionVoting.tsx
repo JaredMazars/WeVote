@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import {
   FileText,
   ThumbsUp,
@@ -13,7 +14,8 @@ import {
   Info,
   Shield,
   Eye,
-  X
+  X,
+  Vote
 } from 'lucide-react';
 import Header from '../components/Header';
 import VotingStatusBar from '../components/VotingStatusBar';
@@ -75,12 +77,16 @@ const ResolutionVoting: React.FC = () => {
   const [showProxyModal, setShowProxyModal] = useState(false);
   const [filter, setFilter] = useState<'all' | 'active' | 'closed' | 'upcoming'>('active');
   const [votingAs, setVotingAs] = useState<'self' | 'proxy'>('self');
+  const [voteWeight, setVoteWeight] = useState({ ownVote: 1, proxyCount: 0, totalWeight: 1, proxyAssignees: [] as any[] });
   const [isAdmin, setIsAdmin] = useState(false); // Check if user is admin
   const [blockchainReceipt, setBlockchainReceipt] = useState<any>(null);
+  const [lastVoteId, setLastVoteId] = useState<string | null>(null);
+  const navigate = useNavigate();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [lastVotedChoice, setLastVotedChoice] = useState<VoteChoice | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
   const [voteError, setVoteError] = useState<string | null>(null);
+  const [voteAllocation, setVoteAllocation] = useState<{ allocated: number; used: number; remaining: number } | null>(null);
   
   // AGM Timer enforcement
   const [showLockedModal, setShowLockedModal] = useState(false);
@@ -99,39 +105,31 @@ const ResolutionVoting: React.FC = () => {
   useEffect(() => {
     loadData();
     checkUserRole();
-    checkAGMStatus();
-    
-    // Check timer status on mount
-    const checkTimerStatus = () => {
-      const savedStartDateTime = localStorage.getItem('agmStartDateTime');
-      const savedEndTime = localStorage.getItem('agmTimerEndTime');
-      
-      if (savedStartDateTime) {
-        setStartDateTime(new Date(savedStartDateTime));
-      }
-      if (savedEndTime) {
-        setEndTime(savedEndTime);
-      }
-      
-      if (!isVotingAllowed()) {
-        setShowLockedModal(true);
-      }
+  }, []);
+
+  // Poll every 5 s — auto-unlocks as soon as the admin starts the session
+  useEffect(() => {
+    const pollSession = async () => {
+      try {
+        const sessionRes = await api.getActiveSession();
+        const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+        const session = sessions[0];
+        const sessionId: number | null = session?.SessionID || session?.sessionId || null;
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          setShowLockedModal(false);
+          setShowClosedModal(false);
+          if (session?.ScheduledStartTime) setStartDateTime(new Date(session.ScheduledStartTime));
+          if (session?.ScheduledEndTime) {
+            setEndTime(new Date(session.ScheduledEndTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+          }
+        } else {
+          setActiveSessionId(null);
+        }
+      } catch { /* silent */ }
     };
-    
-    checkTimerStatus();
-    
-    // Listen for timer updates
-    const handleTimerUpdate = () => {
-      checkTimerStatus();
-    };
-    
-    window.addEventListener('agmTimerUpdated', handleTimerUpdate);
-    window.addEventListener('storage', handleTimerUpdate);
-    
-    return () => {
-      window.removeEventListener('agmTimerUpdated', handleTimerUpdate);
-      window.removeEventListener('storage', handleTimerUpdate);
-    };
+    const interval = setInterval(pollSession, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const checkUserRole = async () => {
@@ -150,8 +148,8 @@ const ResolutionVoting: React.FC = () => {
 
   const checkAGMStatus = async () => {
     try {
-      const response = await api.get('/sessions?status=in_progress');
-      const sessions = (response.data as any)?.sessions || [];
+      const response = await api.getActiveSession();
+      const sessions = (response.data as any)?.sessions || (Array.isArray(response.data) ? response.data : []);
       const userStr = localStorage.getItem('user');
       if (userStr) {
         const currentUser = JSON.parse(userStr);
@@ -173,6 +171,53 @@ const ResolutionVoting: React.FC = () => {
       const session = sessions[0];
       const sessionId = session?.SessionID || session?.sessionId || null;
       setActiveSessionId(sessionId);
+
+      // Show/hide locked modal based on whether there is an active session
+      if (sessionId) {
+        setShowLockedModal(false);
+        setShowClosedModal(false);
+      } else {
+        setShowLockedModal(true);
+      }
+
+      // Populate VotingLockedModal dates from real session
+      if (session?.ScheduledStartTime) {
+        setStartDateTime(new Date(session.ScheduledStartTime));
+      }
+      if (session?.ScheduledEndTime) {
+        setEndTime(new Date(session.ScheduledEndTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+      }
+
+      // Load vote weight / proxy info for this session
+      if (sessionId && user) {
+        try {
+          const weightRes = await api.getVoteWeightForUser(parseInt(user.id), sessionId);
+          if (weightRes.success && weightRes.data) {
+            const wd = weightRes.data as any;
+            setVoteWeight({
+              ownVote: wd.ownVotes ?? 1,
+              proxyCount: wd.proxyCount ?? 0,
+              totalWeight: wd.totalVotes ?? 1,
+              proxyAssignees: wd.proxies ?? [],
+            });
+          }
+        } catch { /* non-critical — falls back to ownVote: 1 */ }
+
+        // Load user's vote allocation (remaining resolution votes)
+        try {
+          const allocRes = await api.getUserAllocation(parseInt(user.id), sessionId);
+          if (allocRes.success && (allocRes.data as any)?.allocation) {
+            const a = (allocRes.data as any).allocation;
+            setVoteAllocation({
+              allocated: a.AllocatedVotes ?? 2,
+              used: a.ResolutionVotesUsed ?? 0,
+              remaining: a.ResolutionVotesRemaining ?? (a.AllocatedVotes ?? 2),
+            });
+          } else if (allocRes.success && (allocRes.data as any)?.unlimited) {
+            setVoteAllocation(null);
+          }
+        } catch { /* non-critical */ }
+      }
 
       // Load resolutions from API
       try {
@@ -204,6 +249,25 @@ const ResolutionVoting: React.FC = () => {
       }
 
       setProxyGroups([]);
+
+      // Pre-populate already-voted resolutions so cards show current choice on reload
+      if (sessionId) {
+        try {
+          const historyRes = await api.getVoteHistory(sessionId);
+          if (historyRes.success && Array.isArray(historyRes.data)) {
+            const choiceMap: Record<string, 'yes' | 'no' | 'abstain'> = { yes: 'for', no: 'against', abstain: 'abstain' } as any;
+            const previousVotes: Record<string, VoteChoice> = {};
+            historyRes.data
+              .filter((v: any) => (v.VoteType || v.voteType) === 'resolution')
+              .forEach((v: any) => {
+                const rid = String(v.EntityID || v.entityId || v.ResolutionID || v.resolutionId);
+                const raw = (v.Category || v.category || v.VoteChoice || v.voteChoice || '').toLowerCase();
+                previousVotes[rid] = (choiceMap[raw] ?? (raw === 'for' ? 'for' : raw === 'against' ? 'against' : 'abstain')) as VoteChoice;
+              });
+            if (Object.keys(previousVotes).length > 0) setUserVotes(previousVotes);
+          }
+        } catch { /* non-critical */ }
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -225,11 +289,19 @@ const ResolutionVoting: React.FC = () => {
       const voteChoiceMap: Record<string, 'yes' | 'no' | 'abstain'> = { for: 'yes', against: 'no', abstain: 'abstain' };
       const voteChoice = voteChoiceMap[choice as string] ?? 'abstain';
 
-      // Cast vote via real API
+      // Cast vote via real API — include proxy weight when votingAs === 'proxy'
+      const votesToAllocate = votingAs === 'proxy' ? voteWeight.totalWeight : voteWeight.ownVote;
+      const proxyUserIds =
+        votingAs === 'proxy' && voteWeight.proxyAssignees.length > 0
+          ? voteWeight.proxyAssignees.map((a: any) => a.id || a.userId)
+          : undefined;
+
       const voteRes = await api.castResolutionVote({
         sessionId: activeSessionId,
         resolutionId: parseInt(resolutionId),
         voteChoice,
+        votesToAllocate,
+        ...(proxyUserIds ? { proxyUserIds } : {}),
       });
 
       if (!voteRes.success && voteRes.message) {
@@ -253,6 +325,7 @@ const ResolutionVoting: React.FC = () => {
         setBlockchainReceipt({ recorded: true });
       } catch { /* non-critical */ }
 
+      setLastVoteId((voteRes.data as any)?.result?.VoteID?.toString() || null);
       setShowSuccessModal(true);
       setTimeout(() => setShowSuccessModal(false), 4000);
     } catch (error: any) {
@@ -379,6 +452,29 @@ const ResolutionVoting: React.FC = () => {
                   <Eye className="h-4 w-4" />
                   <span>View Details</span>
                 </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Vote Allocation Summary */}
+          {voteAllocation && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-r from-indigo-50 to-blue-50 border-2 border-indigo-200 rounded-2xl p-4 mb-6"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Vote className="h-5 w-5 text-indigo-600" />
+                  <div>
+                    <p className="text-sm font-bold text-indigo-900">Resolution Votes</p>
+                    <p className="text-xs text-indigo-600">{voteAllocation.used} used · {voteAllocation.allocated} total allocation</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-2xl font-bold text-indigo-900">{voteAllocation.remaining}</span>
+                  <span className="text-xs text-indigo-600 ml-1">remaining</span>
+                </div>
               </div>
             </motion.div>
           )}
@@ -801,15 +897,15 @@ const ResolutionVoting: React.FC = () => {
                     <div className="space-y-2 text-left">
                       <div className="flex justify-between text-sm">
                         <span className="text-blue-700">Transaction ID:</span>
-                        <span className="font-mono text-xs text-blue-900">{blockchainReceipt.blockchainReceipt.transactionId.substring(0, 20)}...</span>
+                        <span className="font-mono text-xs text-blue-900">{(blockchainReceipt?.blockchainReceipt?.transactionId ?? 'Pending...').substring(0, 20)}...</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-blue-700">Block Number:</span>
-                        <span className="font-bold text-blue-900">#{blockchainReceipt.blockchainReceipt.blockNumber}</span>
+                        <span className="font-bold text-blue-900">#{blockchainReceipt?.blockchainReceipt?.blockNumber ?? '—'}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-blue-700">Status:</span>
-                        <span className="font-bold text-green-600">✓ {blockchainReceipt.blockchainReceipt.status}</span>
+                        <span className="font-bold text-green-600">✓ {blockchainReceipt?.blockchainReceipt?.status ?? 'Recorded'}</span>
                       </div>
                     </div>
                     <button
@@ -827,6 +923,20 @@ const ResolutionVoting: React.FC = () => {
                 >
                   Close
                 </button>
+                <button
+                  onClick={() => navigate('/voting/results')}
+                  className="mt-2 px-6 py-2 border-2 border-[#0072CE] text-[#0072CE] rounded-lg hover:bg-blue-50 transition-all font-medium w-full"
+                >
+                  📊 View Live Results
+                </button>
+                {lastVoteId && (
+                  <button
+                    onClick={() => navigate(`/vote-receipt/${lastVoteId}`)}
+                    className="mt-2 px-6 py-2 border-2 border-green-500 text-green-700 rounded-lg hover:bg-green-50 transition-all font-medium w-full"
+                  >
+                    🧾 View My Receipt
+                  </button>
+                )}
               </motion.div>
             </motion.div>
           )}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import Header from '../components/Header';
 import api from '../services/api';
+import { pdfService } from '../services/pdfExport';
 import * as XLSX from 'xlsx';
 
 interface AuditLog {
@@ -217,6 +218,44 @@ export default function AuditorPortal() {
     ], { origin: -1, skipHeader: true });
 
     XLSX.writeFile(wb, `Attendance_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const exportAGMResultsPDF = async () => {
+    try {
+      const sid = activeSessionId;
+      const [ candRes, resRes ] = await Promise.all([
+        sid ? api.getCandidateResults(sid) : Promise.resolve({ data: null }),
+        sid ? api.getResolutionResults(sid) : Promise.resolve({ data: null }),
+      ]);
+
+      const rawCandidates: any[] = (candRes.data as any)?.results || (candRes.data as any)?.candidates || [];
+      const rawResolutions: any[] = (resRes.data as any)?.results || (resRes.data as any)?.resolutions || [];
+
+      const totalCandVotes = rawCandidates.reduce((s: number, c: any) => s + (c.VoteCount ?? c.votes ?? 0), 0);
+
+      pdfService.generateAGMReport({
+        sessionTitle: (candRes.data as any)?.sessionTitle || 'Annual General Meeting',
+        generatedAt: new Date(),
+        candidates: rawCandidates.map((c: any) => ({
+          name: c.FullName ?? c.name ?? 'Unknown',
+          position: c.Position ?? c.position ?? '',
+          votes: c.VoteCount ?? c.votes ?? 0,
+          percentage: totalCandVotes > 0 ? (((c.VoteCount ?? c.votes ?? 0) / totalCandVotes) * 100) : 0,
+        })),
+        resolutions: rawResolutions.map((r: any) => ({
+          number: r.ResolutionNumber ?? r.number ?? '',
+          title: r.ResolutionTitle ?? r.title ?? 'Resolution',
+          yes: r.YesVotes ?? r.yes ?? 0,
+          no: r.NoVotes ?? r.no ?? 0,
+          abstain: r.AbstainVotes ?? r.abstain ?? 0,
+          totalVotes: (r.YesVotes ?? r.yes ?? 0) + (r.NoVotes ?? r.no ?? 0) + (r.AbstainVotes ?? r.abstain ?? 0),
+          passed: (r.YesVotes ?? r.yes ?? 0) > (r.NoVotes ?? r.no ?? 0),
+        })),
+      });
+    } catch (err) {
+      console.error('Failed to generate AGM PDF:', err);
+      alert('Failed to generate PDF. Please try again.');
+    }
   };
 
   const exportFullAuditReport = () => {
@@ -552,7 +591,20 @@ export default function AuditorPortal() {
             <div className="bg-white rounded-2xl shadow-xl p-8">
               <h3 className="text-2xl font-bold text-slate-900 mb-6">📊 Export Audit Reports</h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-6">
+                <motion.div
+                  whileHover={{ scale: 1.05 }}
+                  className="bg-gradient-to-br from-purple-50 to-indigo-100 rounded-xl p-6 cursor-pointer border-2 border-purple-200"
+                  onClick={exportAGMResultsPDF}
+                >
+                  <div className="text-5xl mb-4">📄</div>
+                  <h4 className="text-xl font-bold text-slate-900 mb-2">AGM Results PDF</h4>
+                  <p className="text-slate-600 mb-4">Official AGM report with candidates & resolutions — print or save as PDF</p>
+                  <button className="w-full px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors">
+                    Generate PDF
+                  </button>
+                </motion.div>
+
                 <motion.div
                   whileHover={{ scale: 1.05 }}
                   className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 cursor-pointer border-2 border-blue-200"

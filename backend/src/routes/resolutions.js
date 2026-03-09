@@ -7,6 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { body, param, query } = require('express-validator');
 const Resolution = require('../models/Resolution');
+const AGMSession = require('../models/AGMSession');
 const { validate } = require('../middleware/validator');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
@@ -106,6 +107,12 @@ router.post('/', [
   body('displayOrder').optional().isInt().withMessage('Display order must be an integer'),
   validate
 ], asyncHandler(async (req, res) => {
+  // Session lock guard — cannot add resolutions while session is live
+  const lockSession = await AGMSession.findById(req.body.sessionId);
+  if (lockSession && lockSession.Status === 'in_progress') {
+    throw new AppError('Cannot add resolutions while the session is in progress', 423);
+  }
+
   const resolutionData = {
     ...req.body,
     proposedBy: req.user.userId
@@ -139,6 +146,15 @@ router.put('/:id', [
 ], asyncHandler(async (req, res) => {
   const resolutionId = parseInt(req.params.id);
 
+  // Session lock guard
+  const existingRes = await Resolution.findById(resolutionId);
+  if (existingRes) {
+    const lockSession = await AGMSession.findById(existingRes.SessionID);
+    if (lockSession && lockSession.Status === 'in_progress') {
+      throw new AppError('Cannot update resolutions while the session is in progress', 423);
+    }
+  }
+
   const resolution = await Resolution.update(resolutionId, req.body);
 
   if (!resolution) {
@@ -162,6 +178,15 @@ router.delete('/:id', [
   validate
 ], asyncHandler(async (req, res) => {
   const resolutionId = parseInt(req.params.id);
+
+  // Session lock guard
+  const existingRes = await Resolution.findById(resolutionId);
+  if (existingRes) {
+    const lockSession = await AGMSession.findById(existingRes.SessionID);
+    if (lockSession && lockSession.Status === 'in_progress') {
+      throw new AppError('Cannot delete resolutions while the session is in progress', 423);
+    }
+  }
 
   const result = await Resolution.delete(resolutionId);
 

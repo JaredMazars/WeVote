@@ -228,7 +228,7 @@ class ApiService {
     });
   }
 
-  async castResolutionVote(data: { sessionId: number; resolutionId: number; voteChoice: 'yes' | 'no' | 'abstain'; votesToAllocate?: number }) {
+  async castResolutionVote(data: { sessionId: number; resolutionId: number; voteChoice: 'yes' | 'no' | 'abstain'; votesToAllocate?: number; proxyUserIds?: number[] }) {
     return this.request('/votes/resolution', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -237,6 +237,27 @@ class ApiService {
 
   async getVotingResults() {
     return this.request('/votes/results');
+  }
+
+  async getCandidateResults(sessionId: number) {
+    return this.request(`/votes/results/candidates/${sessionId}`);
+  }
+
+  async getResolutionResults(sessionId: number) {
+    return this.request(`/votes/results/resolutions/${sessionId}`);
+  }
+
+  async getVoteHistory(sessionId?: number) {
+    const qs = sessionId ? `?sessionId=${sessionId}` : '';
+    return this.request(`/votes/history${qs}`);
+  }
+
+  /** Opens a Server-Sent Events stream for live results.
+   *  Not an async fetch — returns an EventSource instance. */
+  streamResults(sessionId: number): EventSource {
+    const token = localStorage.getItem('token') || '';
+    const url = `${API_BASE_URL}/votes/results/stream/${sessionId}?token=${encodeURIComponent(token)}`;
+    return new EventSource(url);
   }
 
   async getActiveSession() {
@@ -248,7 +269,13 @@ class ApiService {
   }
 
   async getVoteWeightForUser(userId: number, sessionId: number) {
-    return this.request(`/proxy/vote-weight/${userId}/${sessionId}`);
+    const res = await this.request<any>(`/proxy/vote-weight/${userId}/${sessionId}`);
+    // Backend returns { voteWeight: { ownVotes, proxyCount, totalVotes, proxies, canVote } }
+    // Unwrap so callers can access fields directly on res.data
+    if (res.success && res.data?.voteWeight) {
+      return { ...res, data: res.data.voteWeight };
+    }
+    return res;
   }
 
   async recordBlockchainVote(voteData: any) {
@@ -325,6 +352,26 @@ class ApiService {
     return this.request(`/users/${userId}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ isActive }),
+    });
+  }
+
+  async promoteUser(userId: number, role: string) {
+    return this.request(`/users/${userId}/role`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    });
+  }
+
+  async approveAsVoter(userId: number) {
+    return this.request(`/users/${userId}/approve-as-voter`, {
+      method: 'PUT',
+    });
+  }
+
+  async setGoodStanding(userId: number, isGoodStanding: boolean, note?: string) {
+    return this.request(`/users/${userId}/good-standing`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isGoodStanding, note }),
     });
   }
 
@@ -415,8 +462,23 @@ class ApiService {
     return this.request(`/sessions/${sessionId}/reset`, { method: 'POST' });
   }
 
+  async resumeSession(sessionId: number) {
+    return this.request(`/sessions/${sessionId}/resume`, { method: 'POST' });
+  }
+
   async getAllocationStatistics(sessionId: number) {
     return this.request(`/allocations/statistics/${sessionId}`);
+  }
+
+  async getVoteLimits() {
+    return this.request('/vote-splitting/limits');
+  }
+
+  async saveVoteLimits(min: number, max: number) {
+    return this.request('/vote-splitting', {
+      method: 'POST',
+      body: JSON.stringify({ min_individual_votes: min, max_individual_votes: max }),
+    });
   }
 
   // Vote Allocations
@@ -441,6 +503,17 @@ class ApiService {
         maxCandidateVotes: votes,
         maxResolutionVotes: votes,
       }),
+    });
+  }
+
+  async getUserAllocation(userId: number, sessionId: number) {
+    return this.request(`/allocations/user/${userId}/${sessionId}`);
+  }
+
+  async resetUserPassword(userId: number, password?: string) {
+    return this.request(`/users/${userId}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify(password ? { password } : {}),
     });
   }
 
@@ -506,11 +579,15 @@ class ApiService {
   }
 
   async getQuorum(sessionId: number) {
-    return this.request(`/audit/quorum/${sessionId}`);
+    return this.request(`/audit-logs/quorum/${sessionId}`);
   }
 
   async getAuditStats() {
-    return this.request('/audit/stats');
+    return this.request('/audit-logs/stats');
+  }
+
+  async verifyVote(voteId: string | number) {
+    return this.request(`/votes/verify/${voteId}`);
   }
 
   // Generic HTTP methods for flexibility

@@ -23,7 +23,12 @@ import NotificationsPage from './pages/NotificationsPage';
 import AdminManagementDashboard from './pages/AdminManagementDashboard';
 import AuditorPortal from './pages/AuditorPortal';
 import LiveSupportWidget from './components/LiveSupportWidget';
+import MarlonChatbot from './components/MarlonChatbot';
 import CandidateCheckIn from './pages/CandidateCheckIn';
+import UnauthorizedPage from './pages/UnauthorizedPage';
+import VotingResults from './pages/VotingResults';
+import SuperAdminPanel from './pages/SuperAdminPanel';
+import VoteReceipt from './pages/VoteReceipt';
 
 function App() {
   return (
@@ -36,6 +41,7 @@ function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/employee-register" element={<EmployeeRegister />} />
           <Route path="/employee-login-register" element={<EmployeeRegister />} />
+          <Route path="/unauthorized" element={<UnauthorizedPage />} />
           
           {/* Protected Routes - All Authenticated Users */}
           <Route path="/home" element={
@@ -56,6 +62,11 @@ function App() {
           <Route path="/voting/resolutions" element={
             <ProtectedRoute>
               <ResolutionVoting />
+            </ProtectedRoute>
+          } />
+          <Route path="/voting/results" element={
+            <ProtectedRoute>
+              <VotingResults />
             </ProtectedRoute>
           } />
           <Route path="/proxy-assignment" element={
@@ -88,6 +99,11 @@ function App() {
               <VoteVerification />
             </ProtectedRoute>
           } />
+          <Route path="/vote-receipt/:voteId" element={
+            <ProtectedRoute>
+              <VoteReceipt />
+            </ProtectedRoute>
+          } />
           <Route path="/demo" element={
             <ProtectedRoute>
               <FeaturesDemoPage />
@@ -109,7 +125,7 @@ function App() {
             </ProtectedRoute>
           } />
           <Route path="/check-in" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['admin', 'super_admin']}>
               <CandidateCheckIn />
             </ProtectedRoute>
           } />
@@ -137,6 +153,11 @@ function App() {
               <SuperAdminDashboard />
             </ProtectedRoute>
           } />
+          <Route path="/superadmin-panel" element={
+            <ProtectedRoute allowedRoles={['super_admin']}>
+              <SuperAdminPanel />
+            </ProtectedRoute>
+          } />
           
           {/* Auditor Routes - Only Auditor & Super Admin */}
           <Route path="/auditor" element={
@@ -149,6 +170,7 @@ function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
         <LiveSupportWidget />
+        <MarlonChatbot />
       </Router>
     </AuthProvider>
   );

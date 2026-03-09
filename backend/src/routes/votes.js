@@ -6,9 +6,12 @@ const express = require('express');
 const router = express.Router();
 const { body, param } = require('express-validator');
 const Vote = require('../models/Vote');
+const AGMSession = require('../models/AGMSession');
+const User = require('../models/User');
 const { validate } = require('../middleware/validator');
 const { asyncHandler, AppError } = require('../middleware/errorHandler');
 const logger = require('../config/logger');
+const { sendVoteConfirmationEmail } = require('../services/emailService');
 
 // @route   POST /api/votes/candidate
 // @desc    Cast vote for candidate
@@ -19,17 +22,103 @@ router.post('/candidate', [
   body('votesToAllocate').isInt({ min: 1 }).withMessage('Votes to allocate must be at least 1'),
   validate
 ], asyncHandler(async (req, res) => {
-  const voteData = {
-    ...req.body,
-    voterUserId: req.user.userId
-  };
+  const { sessionId, candidateId, votesToAllocate } = req.body;
+  const voterUserId = req.user.userId;
 
+  // 0. Role-based voting eligibility check
+  if (!['voter', 'admin', 'super_admin'].includes(req.user.role)) {
+    throw new AppError('You are not authorised to vote. Your account has not been approved as a voter. Please contact an administrator.', 403);
+  }
+
+  // 0b. Good standing check (voters only) — vote IS cast but flagged if not in good standing
+  let notGoodStanding = false;
+  if (req.user.role === 'voter') {
+    const { executeQuery } = require('../config/database');
+    const standingRes = await executeQuery(
+      'SELECT IsGoodStanding, GoodStandingNote FROM Users WHERE UserID = @userId',
+      { userId: voterUserId }
+    );
+    const standing = standingRes.recordset[0];
+    if (!standing || !standing.IsGoodStanding) {
+      notGoodStanding = true;
+    }
+  }
+
+  // 1. Duplicate vote prevention
+  const alreadyVoted = await Vote.hasVotedForCandidate(voterUserId, sessionId, candidateId);
+  if (alreadyVoted) {
+    throw new AppError('You have already voted for this candidate in this session', 409);
+  }
+
+  // 2. Quorum enforcement
+  const session = await AGMSession.findById(sessionId);
+  if (session && session.TotalVoters > 0 && !session.QuorumReached) {
+    const attendeeCount = await Vote.getAttendanceCount(sessionId);
+    const quorumPct = (attendeeCount / session.TotalVoters) * 100;
+    if (quorumPct < (session.QuorumRequired || 50)) {
+      throw new AppError(
+        `Quorum not met (${quorumPct.toFixed(1)}% present, ${session.QuorumRequired || 50}% required). Voting cannot proceed until quorum is reached.`,
+        403
+      );
+    }
+  }
+
+  const voteData = { sessionId, candidateId, votesToAllocate, voterUserId };
   const result = await Vote.castCandidateVote(voteData);
 
-  logger.info(`Candidate vote cast: Session ${req.body.sessionId}, Candidate ${req.body.candidateId} by user ${req.user.userId}`);
+  logger.info(`Candidate vote cast: Session ${sessionId}, Candidate ${candidateId} by user ${voterUserId}${notGoodStanding ? ' [FLAGGED — not in good standing]' : ''}`);
+
+  // If not in good standing, log the flagged vote and notify (non-blocking)
+  if (notGoodStanding) {
+    const { executeQuery } = require('../config/database');
+    executeQuery(`
+      INSERT INTO AuditLog (UserID, Action, EntityType, EntityID, Details, IPAddress, UserAgent, CreatedAt)
+      VALUES (@uid, 'VOTE_CAST_NOT_GOOD_STANDING', 'CandidateVote', @cid, @details, @ip, @ua, GETDATE())
+    `, {
+      uid: voterUserId,
+      cid: candidateId,
+      details: `Vote recorded but flagged — user ${voterUserId} cast candidate vote while not in good standing. VoteID: ${result?.VoteID || 'N/A'}`,
+      ip: req.ip || 'unknown',
+      ua: req.headers['user-agent'] || 'unknown'
+    }).catch(e => logger.warn('Audit log failed (non-fatal):', e.message));
+    User.findById(voterUserId).then(voter => {
+      if (voter?.Email) {
+        const { sendNotGoodStandingEmail } = require('../services/emailService');
+        sendNotGoodStandingEmail({ email: voter.Email, firstName: voter.FirstName }).catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
+  // 3. Fire-and-forget vote confirmation email (never block the response)
+  try {
+    const voter = await User.findById(voterUserId);
+    if (voter?.Email) {
+      const candidateRes = await require('../config/database').executeQuery(
+        `SELECT e.FirstName + ' ' + e.LastName AS FullName FROM Candidates c
+         INNER JOIN Employees emp ON c.EmployeeID = emp.EmployeeID
+         INNER JOIN Users e ON emp.UserID = e.UserID
+         WHERE c.CandidateID = @candidateId`,
+        { candidateId }
+      );
+      const candidateName = candidateRes.recordset[0]?.FullName || `Candidate #${candidateId}`;
+      sendVoteConfirmationEmail({
+        email: voter.Email,
+        firstName: voter.FirstName,
+        voteType: 'Candidate Vote',
+        entityName: candidateName,
+        voteId: result?.VoteID || 'N/A',
+        sessionTitle: session?.Title || `Session #${sessionId}`
+      }).catch(err => logger.warn('Vote confirmation email failed (non-fatal):', err.message));
+    }
+  } catch (emailErr) {
+    logger.warn('Could not send vote confirmation email (non-fatal):', emailErr.message);
+  }
 
   res.json({
-    message: 'Vote cast successfully',
+    message: notGoodStanding
+      ? 'Your vote has been recorded but flagged for review — your account is not currently in good standing. Please contact an administrator.'
+      : 'Vote cast successfully',
+    flagged: notGoodStanding,
     result
   });
 }));
@@ -44,17 +133,101 @@ router.post('/resolution', [
   body('votesToAllocate').optional().isInt({ min: 1 }).withMessage('Votes to allocate must be at least 1'),
   validate
 ], asyncHandler(async (req, res) => {
-  const voteData = {
-    ...req.body,
-    voterUserId: req.user.userId
-  };
+  const { sessionId, resolutionId, voteChoice, votesToAllocate } = req.body;
+  const voterUserId = req.user.userId;
 
+  // 0. Role-based voting eligibility check
+  if (!['voter', 'admin', 'super_admin'].includes(req.user.role)) {
+    throw new AppError('You are not authorised to vote. Your account has not been approved as a voter. Please contact an administrator.', 403);
+  }
+
+  // 0b. Good standing check (voters only) — vote IS cast but flagged if not in good standing
+  let notGoodStanding = false;
+  if (req.user.role === 'voter') {
+    const { executeQuery } = require('../config/database');
+    const standingRes = await executeQuery(
+      'SELECT IsGoodStanding, GoodStandingNote FROM Users WHERE UserID = @userId',
+      { userId: voterUserId }
+    );
+    const standing = standingRes.recordset[0];
+    if (!standing || !standing.IsGoodStanding) {
+      notGoodStanding = true;
+    }
+  }
+
+  // 1. Duplicate vote prevention
+  const alreadyVoted = await Vote.hasVotedForResolution(voterUserId, sessionId, resolutionId);
+  if (alreadyVoted) {
+    throw new AppError('You have already voted on this resolution in this session', 409);
+  }
+
+  // 2. Quorum enforcement
+  const session = await AGMSession.findById(sessionId);
+  if (session && session.TotalVoters > 0 && !session.QuorumReached) {
+    const attendeeCount = await Vote.getAttendanceCount(sessionId);
+    const quorumPct = (attendeeCount / session.TotalVoters) * 100;
+    if (quorumPct < (session.QuorumRequired || 50)) {
+      throw new AppError(
+        `Quorum not met (${quorumPct.toFixed(1)}% present, ${session.QuorumRequired || 50}% required). Voting cannot proceed until quorum is reached.`,
+        403
+      );
+    }
+  }
+
+  const voteData = { sessionId, resolutionId, voteChoice, votesToAllocate: votesToAllocate || 1, voterUserId };
   const result = await Vote.castResolutionVote(voteData);
 
-  logger.info(`Resolution vote cast: Session ${req.body.sessionId}, Resolution ${req.body.resolutionId}, Choice: ${req.body.voteChoice} by user ${req.user.userId}`);
+  logger.info(`Resolution vote cast: Session ${sessionId}, Resolution ${resolutionId}, Choice: ${voteChoice} by user ${voterUserId}${notGoodStanding ? ' [FLAGGED — not in good standing]' : ''}`);
+
+  // If not in good standing, log the flagged vote and notify (non-blocking)
+  if (notGoodStanding) {
+    const { executeQuery } = require('../config/database');
+    executeQuery(`
+      INSERT INTO AuditLog (UserID, Action, EntityType, EntityID, Details, IPAddress, UserAgent, CreatedAt)
+      VALUES (@uid, 'VOTE_CAST_NOT_GOOD_STANDING', 'ResolutionVote', @rid, @details, @ip, @ua, GETDATE())
+    `, {
+      uid: voterUserId,
+      rid: resolutionId,
+      details: `Vote recorded but flagged — user ${voterUserId} cast resolution vote while not in good standing. VoteID: ${result?.VoteID || 'N/A'}`,
+      ip: req.ip || 'unknown',
+      ua: req.headers['user-agent'] || 'unknown'
+    }).catch(e => logger.warn('Audit log failed (non-fatal):', e.message));
+    User.findById(voterUserId).then(voter => {
+      if (voter?.Email) {
+        const { sendNotGoodStandingEmail } = require('../services/emailService');
+        sendNotGoodStandingEmail({ email: voter.Email, firstName: voter.FirstName }).catch(() => {});
+      }
+    }).catch(() => {});
+  }
+
+  // 3. Fire-and-forget vote confirmation email
+  try {
+    const voter = await User.findById(voterUserId);
+    if (voter?.Email) {
+      const resRes = await require('../config/database').executeQuery(
+        `SELECT Title FROM Resolutions WHERE ResolutionID = @resolutionId`,
+        { resolutionId }
+      );
+      const resTitle = resRes.recordset[0]?.Title || `Resolution #${resolutionId}`;
+      const choiceLabel = voteChoice === 'yes' ? 'In Favour' : voteChoice === 'no' ? 'Against' : 'Abstain';
+      sendVoteConfirmationEmail({
+        email: voter.Email,
+        firstName: voter.FirstName,
+        voteType: 'Resolution Vote',
+        entityName: `${resTitle} — ${choiceLabel}`,
+        voteId: result?.VoteID || 'N/A',
+        sessionTitle: session?.Title || `Session #${sessionId}`
+      }).catch(err => logger.warn('Vote confirmation email failed (non-fatal):', err.message));
+    }
+  } catch (emailErr) {
+    logger.warn('Could not send vote confirmation email (non-fatal):', emailErr.message);
+  }
 
   res.json({
-    message: 'Vote cast successfully',
+    message: notGoodStanding
+      ? 'Your vote has been recorded but flagged for review — your account is not currently in good standing. Please contact an administrator.'
+      : 'Vote cast successfully',
+    flagged: notGoodStanding,
     result
   });
 }));
@@ -113,20 +286,26 @@ router.get('/results/resolutions/:sessionId', [
 }));
 
 // @route   GET /api/votes/history
-// @desc    Get user's voting history
+// @desc    Get voting history — all votes for admins/auditors, own votes for regular users
 // @access  Private
 router.get('/history', asyncHandler(async (req, res) => {
-  const userId = req.user.userId;
+  const { userId, role } = req.user;
   const { sessionId } = req.query;
+  const parsedSessionId = sessionId ? parseInt(sessionId) : null;
 
-  const history = await Vote.getUserVotingHistory(
-    userId,
-    sessionId ? parseInt(sessionId) : null
-  );
+  let history;
+  if (['admin', 'super_admin', 'auditor'].includes(role)) {
+    // Admins see all votes with voter names
+    history = await Vote.getAllVotingHistory(parsedSessionId);
+  } else {
+    // Regular users see only their own votes
+    history = await Vote.getUserVotingHistory(userId, parsedSessionId);
+  }
 
   res.json({
+    success: true,
     count: history.length,
-    history
+    data: history
   });
 }));
 
@@ -175,7 +354,7 @@ router.get('/verify/:voteId', [
       cv.SessionID,
       s.Title as SessionTitle,
       cv.CandidateID,
-      c.Category as CandidateName,
+      u_cand.FirstName + ' ' + u_cand.LastName AS CandidateName,
       cv.VoterUserID,
       'Voter-' + CAST(cv.VoterUserID AS NVARCHAR) as VoterIdentifier,
       cv.VotesAllocated,
@@ -185,6 +364,8 @@ router.get('/verify/:voteId', [
     FROM CandidateVotes cv
     INNER JOIN AGMSessions s ON cv.SessionID = s.SessionID
     INNER JOIN Candidates c ON cv.CandidateID = c.CandidateID
+    INNER JOIN Employees emp_c ON c.EmployeeID = emp_c.EmployeeID
+    INNER JOIN Users u_cand ON emp_c.UserID = u_cand.UserID
     WHERE cv.VoteID = @voteId
   `, { voteId });
 
@@ -197,7 +378,7 @@ router.get('/verify/:voteId', [
         rv.SessionID,
         s.Title as SessionTitle,
         rv.ResolutionID,
-        r.ResolutionTitle,
+        r.Title AS ResolutionTitle,
         rv.VoterUserID,
         'Voter-' + CAST(rv.VoterUserID AS NVARCHAR) as VoterIdentifier,
         rv.VoteChoice,
@@ -234,6 +415,37 @@ router.get('/verify/:voteId', [
       // Anonymize voter for privacy
       voterIdentifier: voteData.VoterIdentifier
     }
+  });
+}));
+
+// @route   GET /api/votes/results/stream/:sessionId
+// @desc    Server-Sent Events stream for live voting results
+// @access  Private (token via query param for EventSource compatibility)
+router.get('/results/stream/:sessionId', asyncHandler(async (req, res) => {
+  const sessionId = parseInt(req.params.sessionId);
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const sendUpdate = async () => {
+    try {
+      const [candidates, resolutions] = await Promise.all([
+        Vote.getCandidateResults(sessionId),
+        Vote.getResolutionResults(sessionId)
+      ]);
+      res.write(`data: ${JSON.stringify({ candidates, resolutions, timestamp: new Date().toISOString() })}\n\n`);
+    } catch (err) {
+      logger.error('SSE results stream error:', err);
+    }
+  };
+
+  await sendUpdate();
+  const interval = setInterval(sendUpdate, 10000);
+  req.on('close', () => {
+    clearInterval(interval);
+    logger.info(`Results stream closed for session ${sessionId}`);
   });
 }));
 

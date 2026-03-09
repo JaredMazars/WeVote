@@ -44,33 +44,32 @@ const CandidateVoting: React.FC = () => {
   const [startDateTime, setStartDateTime] = useState<Date | null>(null);
   const [endTime, setEndTime] = useState<string>('');
   
-  // Check if voting is allowed — prefer server session status, fall back to localStorage timer
-  const isVotingAllowed = () => {
-    // If we have a confirmed active session from the server, voting is allowed
-    if (activeSessionId) return true;
-    // Fall back to localStorage timer for backward compat
-    const timerStart = localStorage.getItem('agmTimerStart');
-    const timerEnd = localStorage.getItem('agmTimerEnd');
-    return !!(timerStart && !timerEnd);
-  };
+  // Check if voting is allowed — requires a confirmed active session from the server
+  const isVotingAllowed = () => !!activeSessionId;
   
+  // Poll every 5 s — auto-unlocks as soon as the admin starts the session, no manual refresh needed
   useEffect(() => {
-    // Check timer status on mount
-    const checkTimerStatus = () => {
-      const savedStartDateTime = localStorage.getItem('agmStartDateTime');
-      const savedEndTime = localStorage.getItem('agmTimerEndTime');
-      if (savedStartDateTime) setStartDateTime(new Date(savedStartDateTime));
-      if (savedEndTime) setEndTime(savedEndTime);
-      if (!isVotingAllowed()) setShowLockedModal(true);
+    const pollSession = async () => {
+      try {
+        const sessionRes = await api.getActiveSession();
+        const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+        const session = sessions[0];
+        const sessionId: number | null = session?.SessionID || session?.sessionId || null;
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          setShowLockedModal(false);
+          setShowClosedModal(false);
+          if (session?.ScheduledStartTime) setStartDateTime(new Date(session.ScheduledStartTime));
+          if (session?.ScheduledEndTime) {
+            setEndTime(new Date(session.ScheduledEndTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+          }
+        } else {
+          setActiveSessionId(null);
+        }
+      } catch { /* silent */ }
     };
-    checkTimerStatus();
-    const handleTimerUpdate = () => checkTimerStatus();
-    window.addEventListener('agmTimerUpdated', handleTimerUpdate);
-    window.addEventListener('storage', handleTimerUpdate);
-    return () => {
-      window.removeEventListener('agmTimerUpdated', handleTimerUpdate);
-      window.removeEventListener('storage', handleTimerUpdate);
-    };
+    const interval = setInterval(pollSession, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const [voteType, setVoteType] = useState<'regular' | 'proxy' | 'split' | null>(null);
@@ -84,7 +83,9 @@ const CandidateVoting: React.FC = () => {
   const [splitVoteWeight, setSplitVoteWeight] = useState(0);
   const [showProxyModal, setShowProxyModal] = useState(false);
   const [blockchainReceipt, setBlockchainReceipt] = useState<any>(null);
+  const [lastVoteId, setLastVoteId] = useState<string | null>(null);
   const [showClosedModal, setShowClosedModal] = useState(false);
+  const [voteAllocation, setVoteAllocation] = useState<{ allocated: number; used: number; remaining: number } | null>(null);
 
   // Load candidates + session + vote weight from real API
   useEffect(() => {
@@ -99,8 +100,20 @@ const CandidateVoting: React.FC = () => {
         const sessionId = session?.SessionID || session?.sessionId || null;
         setActiveSessionId(sessionId);
 
-        if (!session && user?.role !== 'auditor') {
-          setShowClosedModal(true);
+        // Show/hide locked modal based on whether there is an active session
+        if (sessionId) {
+          setShowLockedModal(false);
+          setShowClosedModal(false);
+        } else {
+          setShowLockedModal(true);
+        }
+
+        // Populate VotingLockedModal with real session schedule
+        if (session?.ScheduledStartTime) {
+          setStartDateTime(new Date(session.ScheduledStartTime));
+        }
+        if (session?.ScheduledEndTime) {
+          setEndTime(new Date(session.ScheduledEndTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
         }
 
         // 2. Load candidates
@@ -119,6 +132,21 @@ const CandidateVoting: React.FC = () => {
           setCandidates(mapped);
         }
 
+        // Pre-populate already-voted candidates so cards show as voted on reload
+        if (sessionId) {
+          try {
+            const historyRes = await api.getVoteHistory(sessionId);
+            if (historyRes.success && Array.isArray(historyRes.data)) {
+              const alreadyVoted = new Set<string>(
+                historyRes.data
+                  .filter((v: any) => (v.VoteType || v.voteType) === 'candidate')
+                  .map((v: any) => String(v.EntityID || v.entityId || v.CandidateID || v.candidateId))
+              );
+              if (alreadyVoted.size > 0) setVotedCandidates(alreadyVoted);
+            }
+          } catch { /* non-critical */ }
+        }
+
         // 3. Load vote weight / proxy info
         if (sessionId) {
           try {
@@ -133,6 +161,22 @@ const CandidateVoting: React.FC = () => {
                 proxyAssignees: wd.proxies ?? [],
               });
               setEligibility({ canVote: wd.canVote !== false, reason: wd.reason || null });
+            }
+          } catch { /* non-critical */ }
+
+          // 4. Load user's vote allocation (remaining votes)
+          try {
+            const userId = parseInt(user.id);
+            const allocRes = await api.getUserAllocation(userId, sessionId);
+            if (allocRes.success && (allocRes.data as any)?.allocation) {
+              const a = (allocRes.data as any).allocation;
+              setVoteAllocation({
+                allocated: a.AllocatedVotes ?? 2,
+                used: a.CandidateVotesUsed ?? 0,
+                remaining: a.CandidateVotesRemaining ?? (a.AllocatedVotes ?? 2),
+              });
+            } else if (allocRes.success && (allocRes.data as any)?.unlimited) {
+              setVoteAllocation(null); // unlimited — don't restrict
             }
           } catch { /* non-critical */ }
         }
@@ -187,11 +231,24 @@ const CandidateVoting: React.FC = () => {
 
   const handleSubmitVote = async () => {
     if (!selectedCandidate || !voteType || !user) return;
-    if (!isVotingAllowed()) { setShowLockedModal(true); return; }
-    if (!activeSessionId) {
+
+    // If activeSessionId isn't set yet, do one fresh fetch before giving up
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      try {
+        const sessionRes = await api.getActiveSession();
+        const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+        const session = sessions[0];
+        sessionId = session?.SessionID || session?.sessionId || null;
+        if (sessionId) setActiveSessionId(sessionId);
+      } catch { /* ignore */ }
+    }
+
+    if (!sessionId) {
       setVoteError('No active AGM session found. Please contact the administrator.');
       return;
     }
+    if (!isVotingAllowed() && !sessionId) { setShowLockedModal(true); return; }
 
     setIsSubmitting(true);
     setVoteError(null);
@@ -204,7 +261,7 @@ const CandidateVoting: React.FC = () => {
 
       // Cast vote via real API
       const voteRes = await api.castCandidateVote({
-        sessionId: activeSessionId,
+        sessionId: sessionId,
         candidateId,
         votesToAllocate: finalWeight,
         ...(voteType === 'split' && selectedProxyIds.length > 0 ? { proxyUserIds: selectedProxyIds } : {}),
@@ -222,7 +279,7 @@ const CandidateVoting: React.FC = () => {
         await api.recordBlockchainVote({
           voteId: (voteRes.data as any)?.result?.VoteID?.toString() || `VOTE-${Date.now()}`,
           userId: user.id,
-          sessionId: activeSessionId,
+          sessionId: sessionId,
           candidateId,
           voteChoice: `Yes (Weight: ${finalWeight})`,
           timestamp: new Date().toISOString(),
@@ -230,6 +287,7 @@ const CandidateVoting: React.FC = () => {
         setBlockchainReceipt({ recorded: true });
       } catch { /* non-critical */ }
 
+      setLastVoteId((voteRes.data as any)?.result?.VoteID?.toString() || null);
       setVotedCandidates(prev => new Set(prev).add(selectedCandidate.id));
       setIsSubmitting(false);
       setShowSuccessModal(true);
@@ -306,8 +364,16 @@ const CandidateVoting: React.FC = () => {
                       Votes Available: {voteWeight.totalWeight}
                     </p>
                   </div>
+                  {voteAllocation && (
+                    <div className="flex items-center justify-between bg-white/70 rounded-lg px-3 py-2 mt-1">
+                      <span className="text-xs text-blue-700 font-medium">Candidate votes remaining</span>
+                      <span className="text-sm font-bold text-blue-900">
+                        {voteAllocation.remaining} <span className="text-xs font-normal text-blue-600">/ {voteAllocation.allocated}</span>
+                      </span>
+                    </div>
+                  )}
                   {voteWeight.proxyCount > 0 && (
-                    <div className="text-xs text-blue-700">
+                    <div className="text-xs text-blue-700 mt-1">
                       <p>Your vote: {voteWeight.ownVote}</p>
                       <p>Proxy votes: {voteWeight.proxyCount}</p>
                     </div>
@@ -349,7 +415,7 @@ const CandidateVoting: React.FC = () => {
             </div>
           </motion.div>
         )}
-
+https://jared-mmdgyfvz-eastus2.cognitiveservices.azure.com/openai/responses?api-version=2025-04-01-preview
         {/* Proxy Override Warning */}
         {(eligibility as any).willOverride && (
           <motion.div
@@ -540,43 +606,40 @@ const CandidateVoting: React.FC = () => {
                   {!voteType && (
                     <div className="border-t pt-6">
                       <h3 className="text-lg font-bold text-[#464B4B] mb-4">How would you like to vote?</h3>
-                      <div className="grid grid-cols-1 gap-4">
+                      <div className="flex gap-3">
                         <button
                           onClick={() => handleVoteTypeSelect('regular')}
-                          className="p-6 border-2 border-[#0072CE] rounded-xl hover:bg-blue-50 transition-all group"
+                          className="flex-1 flex items-center justify-center gap-3 py-4 px-5 border-2 border-[#0072CE] rounded-xl hover:bg-blue-50 transition-all group"
                         >
-                          <User className="h-8 w-8 text-[#0072CE] mx-auto mb-3 group-hover:scale-110 transition-transform" />
-                          <p className="font-bold text-[#464B4B] mb-1">Regular Vote</p>
-                          <p className="text-sm text-[#464B4B]/60">Vote with your own voting power</p>
-                          <div className="mt-3 text-[#0072CE] font-semibold">
+                          <User className="h-5 w-5 text-[#0072CE] group-hover:scale-110 transition-transform flex-shrink-0" />
+                          <span className="font-bold text-[#464B4B]">Regular Vote</span>
+                          <span className="ml-auto text-[#0072CE] font-semibold text-sm">
                             {voteWeight.ownVote} vote{voteWeight.ownVote > 1 ? 's' : ''}
-                          </div>
+                          </span>
                         </button>
-                        
+
                         <button
                           onClick={() => handleVoteTypeSelect('proxy')}
-                          className="p-6 border-2 border-green-500 rounded-xl hover:bg-green-50 transition-all group"
+                          className="flex-1 flex items-center justify-center gap-3 py-4 px-5 border-2 border-green-500 rounded-xl hover:bg-green-50 transition-all group disabled:opacity-40 disabled:cursor-not-allowed"
                           disabled={voteWeight.proxyCount === 0}
                         >
-                          <Shield className="h-8 w-8 text-green-600 mx-auto mb-3 group-hover:scale-110 transition-transform" />
-                          <p className="font-bold text-[#464B4B] mb-1">Proxy Vote</p>
-                          <p className="text-sm text-[#464B4B]/60">Vote including all proxy votes</p>
-                          <div className="mt-3 text-green-600 font-semibold">
+                          <Shield className="h-5 w-5 text-green-600 group-hover:scale-110 transition-transform flex-shrink-0" />
+                          <span className="font-bold text-[#464B4B]">Proxy Vote</span>
+                          <span className="ml-auto text-green-600 font-semibold text-sm">
                             {voteWeight.totalWeight} total vote{voteWeight.totalWeight > 1 ? 's' : ''}
-                          </div>
+                          </span>
                         </button>
 
                         {voteWeight.proxyCount > 1 && (
                           <button
                             onClick={() => handleVoteTypeSelect('split')}
-                            className="p-6 border-2 border-blue-500 rounded-xl hover:bg-blue-50 transition-all group"
+                            className="flex-1 flex items-center justify-center gap-3 py-4 px-5 border-2 border-blue-500 rounded-xl hover:bg-blue-50 transition-all group"
                           >
-                            <Users className="h-8 w-8 text-blue-600 mx-auto mb-3 group-hover:scale-110 transition-transform" />
-                            <p className="font-bold text-[#464B4B] mb-1">Split Vote</p>
-                            <p className="text-sm text-[#464B4B]/60">Select specific proxies to vote for this candidate</p>
-                            <div className="mt-3 text-blue-600 font-semibold">
-                              Choose from {voteWeight.proxyCount} proxies
-                            </div>
+                            <Users className="h-5 w-5 text-blue-600 group-hover:scale-110 transition-transform flex-shrink-0" />
+                            <span className="font-bold text-[#464B4B]">Split Vote</span>
+                            <span className="ml-auto text-blue-600 font-semibold text-sm">
+                              {voteWeight.proxyCount} proxies
+                            </span>
                           </button>
                         )}
                       </div>
@@ -789,15 +852,15 @@ const CandidateVoting: React.FC = () => {
                     <div className="space-y-2 text-left">
                       <div className="flex justify-between text-sm">
                         <span className="text-blue-700">Transaction ID:</span>
-                        <span className="font-mono text-xs text-blue-900">{blockchainReceipt.blockchainReceipt.transactionId.substring(0, 20)}...</span>
+                        <span className="font-mono text-xs text-blue-900">{(blockchainReceipt?.blockchainReceipt?.transactionId ?? 'Pending...').substring(0, 20)}...</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-blue-700">Block Number:</span>
-                        <span className="font-bold text-blue-900">#{blockchainReceipt.blockchainReceipt.blockNumber}</span>
+                        <span className="font-bold text-blue-900">#{blockchainReceipt?.blockchainReceipt?.blockNumber ?? '—'}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span className="text-blue-700">Status:</span>
-                        <span className="font-bold text-green-600">✓ {blockchainReceipt.blockchainReceipt.status}</span>
+                        <span className="font-bold text-green-600">✓ {blockchainReceipt?.blockchainReceipt?.status ?? 'Recorded'}</span>
                       </div>
                     </div>
                     <button
@@ -815,6 +878,20 @@ const CandidateVoting: React.FC = () => {
                 >
                   Close
                 </button>
+                <button
+                  onClick={() => navigate('/voting/results')}
+                  className="mt-2 px-6 py-2 border-2 border-[#0072CE] text-[#0072CE] rounded-lg hover:bg-blue-50 transition-all font-medium w-full"
+                >
+                  📊 View Live Results
+                </button>
+                {lastVoteId && (
+                  <button
+                    onClick={() => navigate(`/vote-receipt/${lastVoteId}`)}
+                    className="mt-2 px-6 py-2 border-2 border-green-500 text-green-700 rounded-lg hover:bg-green-50 transition-all font-medium w-full"
+                  >
+                    🧾 View My Receipt
+                  </button>
+                )}
               </motion.div>
             </motion.div>
           )}

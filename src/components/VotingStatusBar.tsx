@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 import { 
   Vote, 
   ChevronUp, 
@@ -24,7 +25,7 @@ interface VoteRecord {
   targetName: string;
   targetPosition?: string;
   targetDepartment?: string;
-  voteValue: 'VOTE' | 'ABSTAIN';
+  voteValue: 'VOTE' | 'NO' | 'ABSTAIN';
   votedAt: Date;
   isProxy: boolean;
   proxyFor?: {
@@ -104,8 +105,8 @@ const fetchWithTimeout = async (url: string, options: RequestInit, timeout = 500
 
 // Demo data fallback for when API is unavailable
 const getDemoVotingStatus = (): VotingStatus => ({
-  personalVotesRemaining: 15,
-  personalVotesTotal: 15,
+  personalVotesRemaining: 2,
+  personalVotesTotal: 2,
   proxyVotesRemaining: 2,
   proxyVotesTotal: 2,
   totalVotesRemaining: 17,
@@ -178,8 +179,20 @@ const VotingStatusBar: React.FC = () => {
           return;
         }
 
-        // Get active session
-        const sessionId = 1;
+        // Get active session from real API
+        let sessionId: number = 1;
+        try {
+          const sessionRes = await api.getActiveSession();
+          const sessions = (sessionRes.data as any)?.sessions || (Array.isArray(sessionRes.data) ? sessionRes.data : []);
+          const session = sessions[0];
+          if (session) {
+            sessionId = session.SessionID || session.sessionId || 1;
+          } else {
+            console.log('⚠️ VotingStatusBar: No active session, using default');
+          }
+        } catch (err) {
+          console.warn('⚠️ VotingStatusBar: Could not fetch active session, defaulting to 1:', err);
+        }
         console.log('📊 VotingStatusBar: Fetching data for session:', sessionId);
         
         // Fetch vote allocation with timeout and error handling
@@ -189,11 +202,26 @@ const VotingStatusBar: React.FC = () => {
           'Content-Type': 'application/json'
         };
 
-        let allocatedVotes = 15;
+        let allocatedVotes = 2; // default minimum — updated from API
         let proxies: any[] = [];
         let votes: any[] = [];
 
-        // Try to fetch allocation data
+        // Fetch global vote limits (min set by Super Admin) so fallback is correct
+        try {
+          const limitsResponse = await fetchWithTimeout(
+            `http://localhost:3001/api/vote-splitting/limits`,
+            { headers },
+            5000
+          );
+          if (limitsResponse.ok) {
+            const limitsData = await limitsResponse.json();
+            allocatedVotes = limitsData.minVotes ?? 2;
+          }
+        } catch (err) {
+          console.warn('⚠️ VotingStatusBar: Could not fetch vote limits, defaulting to 2:', err);
+        }
+
+        // Try to fetch allocation data (user-specific, may override the default)
         try {
           console.log('📡 VotingStatusBar: Fetching allocations...');
           const allocationResponse = await fetchWithTimeout(
@@ -206,7 +234,7 @@ const VotingStatusBar: React.FC = () => {
           if (allocationResponse.ok) {
             const allocationData = await allocationResponse.json();
             console.log('✅ VotingStatusBar: Allocation data:', allocationData);
-            allocatedVotes = allocationData.allocation?.AllocatedVotes || 15;
+            allocatedVotes = allocationData.allocation?.AllocatedVotes ?? allocatedVotes;
           }
         } catch (err) {
           console.warn('⚠️ VotingStatusBar: Failed to fetch allocations, using default:', err);
@@ -254,8 +282,8 @@ const VotingStatusBar: React.FC = () => {
         const proxyVotesTotal = proxies.length;
         
         // Calculate used votes
-        const personalVotesUsed = votes.filter((v: any) => !v.IsProxy).length;
-        const proxyVotesUsed = votes.filter((v: any) => v.IsProxy).length;
+        const personalVotesUsed = votes.filter((v: any) => !v.IsProxyVote).length;
+        const proxyVotesUsed = votes.filter((v: any) => v.IsProxyVote).length;
         
         const personalVotesRemaining = allocatedVotes - personalVotesUsed;
         const proxyVotesRemaining = proxyVotesTotal - proxyVotesUsed;
@@ -264,19 +292,21 @@ const VotingStatusBar: React.FC = () => {
         const voteHistory: VoteRecord[] = votes.map((v: any) => ({
           id: v.VoteID?.toString() || '',
           type: v.VoteType === 'candidate' ? 'employee' : 'resolution',
-          targetId: v.CandidateID?.toString() || v.ResolutionID?.toString() || '',
-          targetName: v.CandidateName || v.ResolutionTitle || 'Unknown',
-          targetPosition: v.CandidatePosition,
-          targetDepartment: v.CandidateDepartment,
-          voteValue: v.VoteValue === 'Yes' ? 'VOTE' : 'ABSTAIN',
+          targetId: v.EntityID?.toString() || '',
+          targetName: v.EntityName || 'Unknown',
+          targetPosition: v.Category,
+          targetDepartment: undefined,
+          voteValue: v.VoteType === 'candidate'
+            ? 'VOTE'
+            : (v.Category === 'yes' ? 'VOTE' : v.Category === 'no' ? 'NO' : 'ABSTAIN'),
           votedAt: new Date(v.VotedAt),
-          isProxy: v.IsProxy || false,
+          isProxy: v.IsProxyVote ? true : false,
           proxyFor: v.ProxyForName ? {
             id: v.ProxyForID?.toString() || '',
             name: v.ProxyForName,
             email: v.ProxyForEmail || ''
           } : undefined,
-          weight: 1
+          weight: v.VotesAllocated || 1
         }));
         
         // Transform proxy delegations
@@ -294,7 +324,7 @@ const VotingStatusBar: React.FC = () => {
             name: p.PrincipalName || 'Unknown',
             email: p.PrincipalEmail || '',
             memberNumber: `EMP-${p.PrincipalUserID}`,
-            appointmentType: p.ProxyType === 'INSTRUCTIONAL' ? 'INSTRUCTIONAL' : 'DISCRETIONARY',
+            appointmentType: p.ProxyType?.toLowerCase() === 'instructional' ? 'INSTRUCTIONAL' : 'DISCRETIONARY',
             allowedCandidates: []
           }]
         }));
@@ -402,7 +432,9 @@ const VotingStatusBar: React.FC = () => {
   };
 
   const getVoteValueColor = (value: string) => {
-    return value === 'VOTE' ? 'text-green-600 bg-green-100' : 'text-yellow-600 bg-yellow-100';
+    if (value === 'VOTE') return 'text-green-600 bg-green-100';
+    if (value === 'NO') return 'text-red-600 bg-red-100';
+    return 'text-yellow-600 bg-yellow-100';
   };
 
   const formatDate = (date: Date) => {

@@ -2,7 +2,7 @@ export type User = {
   id: string;
   name: string;
   email: string;
-  role: 'super_admin' | 'admin' | 'employee' | 'user' | 'auditor';
+  role: 'super_admin' | 'admin' | 'voter' | 'user' | 'auditor';
   email_verified: number;
   needs_password_change?: number;
   is_temp_password?: number;

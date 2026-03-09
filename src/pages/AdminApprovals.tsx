@@ -12,9 +12,18 @@ import {
   Filter,
   Shield,
   UserCheck,
-  AlertTriangle
+  AlertTriangle,
+  Calendar,
+  Tag
 } from 'lucide-react';
 import Header from '../components/Header';
+
+interface AGMSession {
+  id: number;
+  title: string;
+  status: string;
+  scheduledStartTime: string;
+}
 
 interface User {
   id: string;
@@ -27,6 +36,7 @@ interface User {
   avatar_url?: string;
   role_name?: string;
   active?: string | boolean;
+  isGoodStanding?: boolean;
   employee_number?: string;
   department_name?: string;
   registration_status?: string;
@@ -39,6 +49,8 @@ interface User {
   goodStandingIdNumber?: string;
   proxy_file_name?: string;
   proxy_file_path?: string;
+  enrolled_session_ids?: number[];
+  enrolled_session_titles?: string[];
 }
 
 interface ProxyForm {
@@ -95,10 +107,38 @@ const AdminApprovals: React.FC = () => {
   const [selectedForm, setSelectedForm] = useState<ProxyForm | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
+  const [availableSessions, setAvailableSessions] = useState<AGMSession[]>([]);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<number[]>([]);  // sessions chosen for current modal user
+  const [sessionLoading, setSessionLoading] = useState(false);
 
   useEffect(() => {
     loadData();
   }, [activeTab]);
+
+  // Load available AGM sessions once on mount
+  useEffect(() => {
+    loadAvailableSessions();
+  }, []);
+
+  const loadAvailableSessions = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:3001/api/sessions', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const mapped = (data.sessions || []).map((s: any) => ({
+        id: s.SessionID,
+        title: s.Title,
+        status: s.Status,
+        scheduledStartTime: s.ScheduledStartTime
+      }));
+      setAvailableSessions(mapped);
+    } catch (err) {
+      console.error('Failed to load sessions:', err);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -145,9 +185,12 @@ const AdminApprovals: React.FC = () => {
           phone: user.PhoneNumber || user.phone,
           role_name: user.Role || user.role_name,
           active: user.IsActive === 1 || user.active,
+          isGoodStanding: !!(user.IsGoodStanding === 1 || user.IsGoodStanding === true),
           registration_status: user.registration_status || ((user.IsActive === 1 || user.active) ? 'approved' : 'pending'),
           created_at: user.CreatedAt || user.created_at,
-          updated_at: user.UpdatedAt || user.updated_at
+          updated_at: user.UpdatedAt || user.updated_at,
+          enrolled_session_ids: user.enrolled_session_ids || [],
+          enrolled_session_titles: user.enrolled_session_titles || []
         }));
         
         console.log('Transformed Users:', transformedUsers);
@@ -210,8 +253,12 @@ const AdminApprovals: React.FC = () => {
     }
   };
 
-  const handleApproveUser = async (user: User) => {
-    if (!window.confirm(`Approve registration for ${user.name}?`)) return;
+  const handleApproveGoodStanding = async (user: User) => {
+    const sessionInfo = selectedSessionIds.length > 0
+      ? `\n\nSessions assigned: ${availableSessions.filter(s => selectedSessionIds.includes(s.id)).map(s => s.title).join(', ')}`
+      : '\n\nNo sessions selected — voter will be auto-assigned to all active sessions.';
+
+    if (!window.confirm(`Activate account for ${user.name}?\nThis will set their role to Voter, generate a temporary password, and email their login credentials.${sessionInfo}\n\nNote: Good standing must be granted separately (Step 2).`)) return;
 
     setActionLoading(true);
     try {
@@ -221,62 +268,90 @@ const AdminApprovals: React.FC = () => {
         return;
       }
 
-      const response = await fetch(`http://localhost:3001/api/users/${user.id}/approve`, {
+      const response = await fetch(`http://localhost:3001/api/users/${user.id}/approve-as-voter`, {
         method: 'PUT',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
-        }
+        },
+        body: JSON.stringify({
+          sessionIds: selectedSessionIds.length > 0 ? selectedSessionIds : undefined
+        })
       });
 
       const result = await response.json();
       if (result.success) {
-        // Update user status to approved
-        setUsers(prev => prev.map(u => 
-          u.id === user.id 
-            ? { ...u, active: true, registration_status: 'approved' }
+        setUsers(prev => prev.map(u =>
+          u.id === user.id
+            ? { ...u, active: true, registration_status: 'approved', role_name: 'voter', enrolled_session_ids: selectedSessionIds }
             : u
         ));
-        alert('User approved successfully!');
-        setSelectedUser(null);
+        setSelectedUser(prev => prev ? { ...prev, active: true, registration_status: 'approved', role_name: 'voter', enrolled_session_ids: selectedSessionIds } : null);
+        alert('Account activated! Login credentials have been emailed. You can now grant good standing (Step 2).');
+        setSelectedSessionIds([]);
+        await loadData();
       } else {
-        alert('Failed to approve user: ' + result.message);
+        alert('Failed to approve as voter: ' + (result.message || 'Unknown error'));
       }
     } catch (error) {
-      console.error('Error approving user:', error);
+      console.error('Error approving as voter:', error);
       alert('Something went wrong while approving the user.');
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleApproveGoodStanding = async (user: User) => {
-    if (!window.confirm(`Approve good standing status for ${user.name}?`)) return;
-
-    setActionLoading(true);
+  // Assign or update session membership for an already-approved user
+  const handleUpdateSessions = async (user: User) => {
+    setSessionLoading(true);
     try {
-      const response = await fetch(`http://localhost:3001/api/approval/users/${user.id}/approve-good-standing`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
+      const token = localStorage.getItem('token');
+      const response = await fetch(`http://localhost:3001/api/users/${user.id}/assign-sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ sessionIds: selectedSessionIds, replaceAll: true })
       });
-
       const result = await response.json();
       if (result.success) {
-        setUsers(prev =>
-          prev.map(u =>
-            u.id === user.id
-              ? { ...u, goodStandingIdNumber: user.id, active: true }
-              : u
-          )
-        );
-        alert('Good standing approved successfully!');
-        setSelectedUser(null);
+        const titles = availableSessions.filter(s => selectedSessionIds.includes(s.id)).map(s => s.title);
+        setUsers(prev => prev.map(u =>
+          u.id === user.id
+            ? { ...u, enrolled_session_ids: selectedSessionIds, enrolled_session_titles: titles }
+            : u
+        ));
+        setSelectedUser(prev => prev ? { ...prev, enrolled_session_ids: selectedSessionIds, enrolled_session_titles: titles } : null);
+        alert('Session assignments updated successfully!');
       } else {
-        alert('Failed to approve good standing: ' + result.message);
+        alert('Failed to update sessions: ' + (result.message || 'Unknown error'));
       }
     } catch (error) {
-      console.error('Error approving good standing:', error);
-      alert('Something went wrong.');
+      alert('Something went wrong while updating sessions.');
+    } finally {
+      setSessionLoading(false);
+    }
+  };
+
+  const handleGrantGoodStanding = async (user: User) => {
+    if (!window.confirm(`Grant good standing to ${user.name}?\nTheir votes will be counted as valid from this point forward.`)) return;
+    setActionLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) { alert('Authentication token not found. Please log in again.'); return; }
+      const response = await fetch(`http://localhost:3001/api/users/${user.id}/good-standing`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ isGoodStanding: true, note: 'Granted during registration approval' })
+      });
+      const result = await response.json();
+      if (result.success) {
+        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, isGoodStanding: true } : u));
+        setSelectedUser(prev => prev ? { ...prev, isGoodStanding: true } : null);
+        alert('Good standing granted. This voter\'s votes will now be counted as valid.');
+      } else {
+        alert('Failed to grant good standing: ' + (result.message || 'Unknown error'));
+      }
+    } catch (error) {
+      alert('Something went wrong while granting good standing.');
     } finally {
       setActionLoading(false);
     }
@@ -682,6 +757,7 @@ const AdminApprovals: React.FC = () => {
                         <th className="px-6 py-4 text-left text-sm font-semibold text-[#464B4B]">Status</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-[#464B4B]">Active</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-[#464B4B]">Good Standing</th>
+                        <th className="px-6 py-4 text-left text-sm font-semibold text-[#464B4B]">Sessions</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-[#464B4B]">Submitted</th>
                         <th className="px-6 py-4 text-left text-sm font-semibold text-[#464B4B]">Actions</th>
                       </tr>
@@ -861,6 +937,76 @@ const AdminApprovals: React.FC = () => {
                 </div>
               </div>
 
+              {/* ── Session Assignment ── */}
+              <div className="bg-blue-50 rounded-xl p-5 mb-6 border border-blue-100">
+                <h4 className="font-semibold text-[#171C8F] mb-3 flex items-center gap-2">
+                  <Calendar className="h-5 w-5" />
+                  Voting Session Assignment
+                </h4>
+                {availableSessions.length === 0 ? (
+                  <p className="text-sm text-[#464B4B]/60 italic">No AGM sessions found. Create sessions in the Super Admin dashboard first.</p>
+                ) : (
+                  <>
+                    <p className="text-sm text-[#464B4B]/70 mb-3">
+                      Select which AGM sessions this voter can participate in. A voter can be enrolled in multiple sessions.
+                    </p>
+                    <div className="grid grid-cols-1 gap-2 max-h-52 overflow-y-auto pr-1">
+                      {availableSessions.map(session => (
+                        <label
+                          key={session.id}
+                          className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 transition-all ${
+                            selectedSessionIds.includes(session.id)
+                              ? 'border-[#0072CE] bg-white shadow-sm'
+                              : 'border-gray-200 bg-white hover:border-gray-300'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="accent-[#0072CE] h-4 w-4"
+                            checked={selectedSessionIds.includes(session.id)}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setSelectedSessionIds(prev => [...prev, session.id]);
+                              } else {
+                                setSelectedSessionIds(prev => prev.filter(id => id !== session.id));
+                              }
+                            }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-[#464B4B] text-sm truncate">{session.title}</p>
+                            <p className="text-xs text-[#464B4B]/60">
+                              {new Date(session.scheduledStartTime).toLocaleDateString()} &bull;
+                              <span className={`ml-1 capitalize ${
+                                session.status === 'in_progress' ? 'text-green-600 font-medium' :
+                                session.status === 'scheduled' ? 'text-blue-600' : 'text-gray-400'
+                              }`}>{session.status.replace('_', ' ')}</span>
+                            </p>
+                          </div>
+                          {selectedSessionIds.includes(session.id) && (
+                            <CheckCircle className="h-4 w-4 text-[#0072CE] flex-shrink-0" />
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                    {/* Save session changes for already-approved users */}
+                    {selectedUser?.active && (
+                      <div className="mt-3 flex justify-end">
+                        <motion.button
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={() => handleUpdateSessions(selectedUser)}
+                          disabled={sessionLoading}
+                          className="flex items-center gap-2 bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white px-4 py-2 rounded-xl font-semibold text-sm disabled:opacity-50"
+                        >
+                          <Tag className="h-4 w-4" />
+                          <span>{sessionLoading ? 'Saving...' : 'Save Session Assignments'}</span>
+                        </motion.button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <div className="bg-gray-50 rounded-xl p-4">
                   <h4 className="font-semibold text-[#464B4B] mb-3">Account Status</h4>
@@ -875,7 +1021,9 @@ const AdminApprovals: React.FC = () => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[#464B4B]/70">Good Standing:</span>
-                      <span>{selectedUser.goodStandingIdNumber ? '✓ Yes' : '✗ No'}</span>
+                      <span className={selectedUser.isGoodStanding ? 'text-emerald-600 font-semibold' : 'text-red-500 font-semibold'}>
+                        {selectedUser.isGoodStanding ? '✓ Granted — votes are valid' : '✗ Not yet granted — votes will be flagged'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -894,55 +1042,55 @@ const AdminApprovals: React.FC = () => {
                 </div>
               </div>
 
-              {selectedUser.registration_status === 'pending' && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-[#464B4B] mb-2">
-                      Rejection Reason (if rejecting)
-                    </label>
-                    <textarea
-                      value={rejectionReason}
-                      onChange={(e) => setRejectionReason(e.target.value)}
-                      rows={3}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-[#0072CE] focus:outline-none"
-                      placeholder="Enter reason for rejection..."
-                    />
-                  </div>
-
-                  <div className="flex gap-4">
-                    <motion.button
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => handleApproveUser(selectedUser)}
-                      disabled={actionLoading}
-                      className="flex-1 flex items-center justify-center space-x-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-4 rounded-xl font-semibold hover:shadow-xl transition-all disabled:opacity-50"
-                    >
-                      <CheckCircle className="h-5 w-5" />
-                      <span>{actionLoading ? 'Processing...' : 'Approve Registration'}</span>
-                    </motion.button>
-
+              {/* Action Buttons for pending users */}
+              {(selectedUser.registration_status === 'pending' || selectedUser.registration_status === 'approved') && (
+                <div className="space-y-3">
+                  <div className="flex gap-3">
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={() => handleApproveGoodStanding(selectedUser)}
-                      disabled={actionLoading}
-                      className="flex-1 flex items-center justify-center space-x-2 bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white px-6 py-4 rounded-xl font-semibold hover:shadow-xl transition-all disabled:opacity-50"
+                      disabled={actionLoading || !!selectedUser.active}
+                      className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-[#0072CE] to-[#171C8F] text-white px-4 py-3 rounded-xl font-semibold text-sm hover:shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      <Shield className="h-5 w-5" />
-                      <span>{actionLoading ? 'Processing...' : 'Approve Good Standing'}</span>
+                      <UserCheck className="h-4 w-4" />
+                      <span>{actionLoading ? 'Processing...' : selectedUser.active ? '✓ Activated' : 'Activate Account'}</span>
                     </motion.button>
 
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => handleRejectUser(selectedUser)}
-                      disabled={actionLoading}
-                      className="flex-1 flex items-center justify-center space-x-2 bg-gradient-to-r from-red-600 to-blue-600 text-white px-6 py-4 rounded-xl font-semibold hover:shadow-xl transition-all disabled:opacity-50"
+                      onClick={() => handleGrantGoodStanding(selectedUser)}
+                      disabled={actionLoading || !!selectedUser.isGoodStanding}
+                      className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-3 rounded-xl font-semibold text-sm hover:shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                     >
-                      <XCircle className="h-5 w-5" />
-                      <span>{actionLoading ? 'Processing...' : 'Reject'}</span>
+                      <Shield className="h-4 w-4" />
+                      <span>{actionLoading ? 'Processing...' : selectedUser.isGoodStanding ? '✓ Good Standing' : 'Grant Good Standing'}</span>
                     </motion.button>
+
+                    {selectedUser.registration_status === 'pending' && (
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => handleRejectUser(selectedUser)}
+                        disabled={actionLoading || !rejectionReason.trim()}
+                        className="flex-1 flex items-center justify-center gap-2 bg-gradient-to-r from-red-600 to-red-700 text-white px-4 py-3 rounded-xl font-semibold text-sm hover:shadow-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <XCircle className="h-4 w-4" />
+                        <span>{actionLoading ? 'Processing...' : 'Reject'}</span>
+                      </motion.button>
+                    )}
                   </div>
+
+                  {selectedUser.registration_status === 'pending' && (
+                    <textarea
+                      value={rejectionReason}
+                      onChange={(e) => setRejectionReason(e.target.value)}
+                      rows={2}
+                      className="w-full px-4 py-2 text-sm border-2 border-gray-200 rounded-xl focus:border-red-400 focus:outline-none"
+                      placeholder="Rejection reason (required to enable Reject button)..."
+                    />
+                  )}
                 </div>
               )}
 
